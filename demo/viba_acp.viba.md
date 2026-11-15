@@ -5,13 +5,13 @@
 ## explain_then_shorten.viba
 
 ```viba
-import viba_acp.public as public
+import viba_acp.public as viba_acp
 
-__decl__ = public.PromptResponse <- $env Env
+__decl__ = viba_acp.PromptResponse <- $env Env
 
 args = __get_args__ << __decl__
 
-session = public.open_session << $env ($sub_env << args.env << "c0")
+session = viba_acp.open_session << $env ($sub_env << args.env << "c0")
 
 question =
     $TextContent Object
@@ -20,11 +20,11 @@ question =
 on_notification =
      void
   <- $env Env
-  <- $notification public.SessionNotification
+  <- $notification viba_acp.SessionNotification
   <- { record one session/update notification }
 
 __impl__ =
-     public.send_prompt << $env ($sub_env << args.env << "c1")
+     viba_acp.send_prompt << $env ($sub_env << args.env << "c1")
   << $session session
   << $prompt (ListLiteral[question])
   << $on_update on_notification

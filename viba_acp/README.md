@@ -4,7 +4,7 @@
 
 一次调用涉及三方：
 
-- **viba 程序**调用 `public.open_session` 与 `public.send_prompt`；agent 的名字、启动命令与通信协议不在程序内。
+- **viba 程序**调用 `viba_acp.open_session` 与 `viba_acp.send_prompt`；agent 的名字、启动命令与通信协议不在程序内。
 - **服务**实现这两个操作（[`agent_service.py`](agent_service.py)），并在进程生命周期内维持一个 agent
   进程与一条 ACP 会话。
 - **agent** 是外部进程，由 [`agents.py`](agents.py) 给出的命令启动，通过 ACP 通信；`VIBA_AGENT`
@@ -62,13 +62,13 @@ store 默认按 agent 分开（`demo/viba_acp/.store/<agent>`），同一份程�
 ### 3.2 viba 程序的调用方式
 
 ```viba
-import viba_acp.public as public
+import viba_acp.public as viba_acp
 
-__decl__ = public.PromptResponse <- $env Env
+__decl__ = viba_acp.PromptResponse <- $env Env
 
 args = __get_args__ << __decl__
 
-session = public.open_session << $env ($sub_env << args.env << "c0")
+session = viba_acp.open_session << $env ($sub_env << args.env << "c0")
 
 question =
     $TextContent Object
@@ -77,11 +77,11 @@ question =
 on_notification =
      void
   <- $env Env
-  <- $notification public.SessionNotification
+  <- $notification viba_acp.SessionNotification
   <- { handle one session/update notification }
 
 __impl__ =
-     public.send_prompt << $env ($sub_env << args.env << "c1")
+     viba_acp.send_prompt << $env ($sub_env << args.env << "c1")
   << $session session
   << $prompt (ListLiteral[question])
   << $on_update on_notification
