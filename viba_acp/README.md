@@ -71,7 +71,7 @@ args = __get_args__ << __decl__
 session = public.open_session << $env ($sub_env << args.env << "c0")
 
 question =
-    $TextContent nil
+    $TextContent Object
   * $text "Explain in one sentence what a type class is."
 
 on_notification =
