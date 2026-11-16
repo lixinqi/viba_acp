@@ -5,25 +5,27 @@
 - `scripted` — the in-repo scripted agent, no model;
 - `claude` — the Claude Agent SDK's ACP adapter, `npx -y
   @agentclientprotocol/claude-agent-acp`. It spawns the Claude CLI itself, so
-  `CLAUDE_CODE_EXECUTABLE` points at the working one; the endpoint and token
-  come from `~/.llm-config/flash-env.sh`;
-- `dsh` — DeepSeek Harness's own `acp` profile, `dsh acp`; it uses the
-  credentials `~/.dsh` already has.
+  `CLAUDE_CODE_EXECUTABLE` points at the working one, else the one on `PATH`;
+  its endpoint and token come from this process's environment;
+- `dsh` — DeepSeek Harness's own `acp` profile, `dsh acp`; `DSH_EXECUTABLE`
+  names the CLI, else the one on `PATH`; it uses the credentials `~/.dsh`
+  already has.
 
 `the_command()` answers `(command, extra environment)`: the environment is
 layered over this process's own when the agent is spawned, never printed.
+
+Nothing here names a machine. The CLIs are looked up on `PATH`, an environment
+variable overrides the lookup when one lives outside it, and credentials stay
+in the environment that started this process.
 """
 
 import os
-import shlex
 import shutil
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent            # viba_acp
-DSH = Path("/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh")
-FLASH_ENV = Path.home() / ".llm-config" / "flash-env.sh"
-CLAUDE_ADAPTER = ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
+CLAUDE_ADAPTER = ("npx", "-y", "@agentclientprotocol/claude-agent-acp")
 
 
 def names():
@@ -36,34 +38,25 @@ def the_command(name=None):
     if name == "scripted":
         return [sys.executable, str(HERE / "scripted_agent.py")], {}
     if name == "claude":
-        env = the_flash_env()
-        executable = os.environ.get("CLAUDE_CODE_EXECUTABLE") or shutil.which("claude")
-        if executable:
-            env.setdefault("CLAUDE_CODE_EXECUTABLE", executable)
+        executable = find_claude()
+        env = {"CLAUDE_CODE_EXECUTABLE": executable} if executable else {}
         return list(CLAUDE_ADAPTER), env
     if name == "dsh":
-        executable = os.environ.get("DSH_EXECUTABLE") or str(DSH)
+        executable = find_dsh()
+        if not executable:
+            raise ValueError("the dsh CLI is not on PATH; set DSH_EXECUTABLE to it")
         return [executable, "acp"], {}
     raise ValueError(f"unknown agent {name!r}; choose one of {', '.join(names())}")
 
 
-def the_flash_env():
-    """`ANTHROPIC_*` from `~/.llm-config/flash-env.sh`, when that file is there."""
-    env = {}
-    if not FLASH_ENV.is_file():
-        return env
-    for line in FLASH_ENV.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line.startswith("export "):
-            continue
-        try:
-            token = shlex.split(line[len("export "):])[0]
-        except (ValueError, IndexError):
-            continue
-        key, _, value = token.partition("=")
-        if key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"):
-            env.setdefault(key, value)
-    return env
+def find_claude():
+    """The Claude CLI: `CLAUDE_CODE_EXECUTABLE`, else the one on `PATH`."""
+    return shutil.which(os.environ.get("CLAUDE_CODE_EXECUTABLE") or "claude")
+
+
+def find_dsh():
+    """The dsh CLI: `DSH_EXECUTABLE`, else the one on `PATH`."""
+    return shutil.which(os.environ.get("DSH_EXECUTABLE") or "dsh")
 
 
 def available(name):
@@ -71,8 +64,7 @@ def available(name):
     if name == "scripted":
         return True
     if name == "claude":
-        return shutil.which("npx") is not None and (
-            os.environ.get("CLAUDE_CODE_EXECUTABLE") or shutil.which("claude"))
+        return shutil.which("npx") is not None and find_claude() is not None
     if name == "dsh":
-        return Path(os.environ.get("DSH_EXECUTABLE") or DSH).exists()
+        return find_dsh() is not None
     return False

@@ -187,17 +187,18 @@ store 中每一步对应一份快照：
 
 ## 6. 接入真实 agent
 
-三个 agent 都已接好，命令与环境在 [`agents.py`](agents.py)，用 `--agent` 选：
+三个 agent 都已接好，命令与环境在 [`agents.py`](agents.py)，用 `--agent` 选。代码里没有本机路径：
+命令从 `PATH` 或环境变量解析，凭据取自启动 `run.py` 的那个环境。
 
 | `--agent` | 命令 | 凭据 |
 |---|---|---|
 | `scripted` | `python3 viba_acp/scripted_agent.py` | 无 |
-| `claude` | `npx -y @agentclientprotocol/claude-agent-acp` | `~/.llm-config/flash-env.sh` 的 `ANTHROPIC_*`；`CLAUDE_CODE_EXECUTABLE` 指向本机的 Claude CLI |
-| `dsh` | `dsh acp`（应用内的 `runtime/cli/bin/dsh`） | `~/.dsh` 里已有的 DeepSeek 凭据 |
+| `claude` | `npx -y @agentclientprotocol/claude-agent-acp` | 环境里的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`；`CLAUDE_CODE_EXECUTABLE` 或 `PATH` 里的 Claude CLI |
+| `dsh` | `dsh acp`（`DSH_EXECUTABLE` 或 `PATH` 里的 `dsh`） | `~/.dsh` 里已有的 DeepSeek 凭据 |
 
 `claude` 的适配器是 Claude Agent SDK 的 ACP 实现（[仓库](https://github.com/agentclientprotocol/claude-agent-acp)）；
-它自己会去找 SDK 附带的 Claude CLI，找不到可用的就设 `CLAUDE_CODE_EXECUTABLE`，`agents.py` 用
-`which claude` 的结果填它。`dsh` 用应用自带的 `acp` profile，路径可用 `DSH_EXECUTABLE` 覆盖。
+它会去找 SDK 附带的 Claude CLI，`agents.py` 用 `PATH` 里的 `claude` 填 `CLAUDE_CODE_EXECUTABLE`。`dsh`
+用 `dsh acp`，CLI 不在 `PATH` 里时用 `DSH_EXECUTABLE` 指过去。
 
 同一份 viba 程序跑三个 agent：
 
@@ -214,7 +215,7 @@ python3 demo/viba_acp/test_agents.py
 python3 viba_acp/acp_client.py --agent "python3 viba_acp/scripted_agent.py" "hello"
 python3 viba_acp/acp_client.py --agent "npx -y @agentclientprotocol/claude-agent-acp" \
     --permission allow "hello"
-python3 viba_acp/acp_client.py --agent "\"/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh\" acp" "hello"
+python3 viba_acp/acp_client.py --agent "dsh acp" "hello"
 ```
 
 输出包含 `text`、`session`、`stop` 与 `agent`（`initialize` 中自报的名字与版本）。默认策略拒绝 agent 的

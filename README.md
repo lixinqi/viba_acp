@@ -21,4 +21,4 @@ python3 demo/viba_acp/test_agent.py             # the scripted agent's suite
 python3 demo/viba_acp/test_agents.py            # the same program against all three
 ```
 
-The store is per agent (`demo/viba_acp/.store/<agent>`). `claude` takes its endpoint and token from `~/.llm-config/flash-env.sh` and its CLI from `CLAUDE_CODE_EXECUTABLE` (or `which claude`); `dsh` runs the app's `dsh acp` profile and uses `~/.dsh`.
+The store is per agent (`demo/viba_acp/.store/<agent>`). `claude` takes its endpoint and token from the environment it is started in and its CLI from `CLAUDE_CODE_EXECUTABLE` (or `PATH`); `dsh` is the `dsh acp` profile, found on `PATH` or named by `DSH_EXECUTABLE`, and uses `~/.dsh`.

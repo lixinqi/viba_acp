@@ -5,8 +5,8 @@
 It runs `run.py --agent <name>` for `scripted`, `claude` and `dsh`, checks that
 the schedule reaches `ok` and that the agent streamed a non-empty answer, and
 prints the first line of each answer. `claude` and `dsh` are skipped when their
-binaries are missing; `claude` takes its endpoint and token from
-`~/.llm-config/flash-env.sh` (through `agents.py`), `dsh` from `~/.dsh`.
+commands are not on this machine; `claude` takes `ANTHROPIC_*` from this
+process's environment, `dsh` its credentials from `~/.dsh`.
 """
 
 import json
