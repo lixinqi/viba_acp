@@ -434,6 +434,9 @@ class Conversation:
                              timeout=timeout, trace=trace, env=env)
         self.client.initialize()
         self.session = self.client.new_session()
+        # The sessions this connection has live: the first one, and every later
+        # one it resumed, loaded or forked.
+        self.sessions = {self.session}
 
     @property
     def agent(self) -> AgentInfo:
@@ -443,30 +446,47 @@ class Conversation:
         """One more turn on this session: one text block in, the response out."""
         return self.prompt_blocks([{"type": "text", "text": text}])
 
+    def prompt_session(self, session: str, blocks: list, on_update=None) -> tuple:
+        """One more turn on the named session: content blocks in, the response out."""
+        return self.client.prompt(session, blocks, on_update)
+
     def prompt_blocks(self, blocks: list, on_update=None) -> tuple:
-        """One more turn on this session: content blocks in, the response out."""
+        """One more turn on this conversation's first session."""
         return self.client.prompt(self.session, blocks, on_update)
 
     def resume_session(self, session: str, cwd: str) -> None:
         """`session/resume`: reconnect to a session the agent already has."""
         self.client.resume_session(session, cwd)
+        self.sessions.add(session)
 
     def load_session(self, session: str, cwd: str, on_update=None) -> None:
         """`session/load`: reconnect to a session, replaying its history."""
         self.client.load_session(session, cwd, on_update)
+        self.sessions.add(session)
 
     def fork_session(self, session: str, cwd: str) -> str:
         """`session/fork`: a new session that carries this one's history."""
-        return self.client.fork_session(session, cwd)
+        forked = self.client.fork_session(session, cwd)
+        self.sessions.add(forked)
+        return forked
+
+    def find_session(self, session: str) -> str:
+        """The named session, if this conversation has it live."""
+        if session not in self.sessions:
+            raise KeyError(f"session {session!r} is not live in this process; "
+                           f"it has {sorted(self.sessions)}")
+        return session
 
     def cancel_session(self, session: str) -> None:
         self.client.cancel_session(session)
 
     def close_session(self, session: str) -> None:
         self.client.close_session(session)
+        self.sessions.discard(session)
 
     def delete_session(self, session: str) -> None:
         self.client.delete_session(session)
+        self.sessions.discard(session)
 
     def archive_session(self, session: str) -> None:
         self.client.archive_session(session)

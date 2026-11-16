@@ -26,6 +26,12 @@ archive_session = apis.archive_session
 unarchive_session = apis.unarchive_session
 set_session_title = apis.set_session_title
 
+Session = types.Session
+AcpBackend = types.AcpBackend
+ScriptedAgentBackend = types.ScriptedAgentBackend
+ClaudeAgentBackend = types.ClaudeAgentBackend
+DshAgentBackend = types.DshAgentBackend
+ContextVersion = types.ContextVersion
 SessionId = types.SessionId
 MessageId = types.MessageId
 ContentBlock = types.ContentBlock
@@ -50,7 +56,8 @@ AgentThoughtChunk = types.AgentThoughtChunk
 ## 基本操作
 
 客户端→agent 的操作有十一个：开会话、提交一轮、接回会话（load/resume）、分叉会话、取消、关闭、删除、
-归档与取消归档、设置标题。它们由服务实现，参数按 ACP 的请求展开，结果按 ACP 的响应给出。
+归档与取消归档、设置标题。它们由服务实现，参数按 ACP 的请求展开，结果按 ACP 的响应给出。会话上的操作
+收 `Session`（ACP 后端 + 该后端的会话编号）；开会话、接回与分叉回答这样的会话句柄。
 
 agent→客户端的通知通过 `$on_update` 这个函数型参数交给调用方；当前建模三种消息块。
 
@@ -68,9 +75,9 @@ import viba_acp.types as types
 
 ```viba apis
 new_session =
-     types.SessionId
+     types.Session
   <- $env Env
-  <- { open a new ACP session and answer its id }
+  <- { open a new ACP session and answer its handle }
 ```
 
 ### send_prompt
@@ -81,7 +88,7 @@ new_session =
 send_prompt =
      types.PromptResponse
   <- $env Env
-  <- $session types.SessionId
+  <- $session types.Session
   <- $prompt list[types.ContentBlock]
   <- $on_update (void <- $env Env <- $notification types.SessionNotification)
   <- { run one prompt turn on that session, calling $on_update for each session/update, and answer its response }
@@ -89,43 +96,43 @@ send_prompt =
 
 ### resume_session
 
-`session/resume`：接上一个已有会话，不重放历史。
+`session/resume`：接上一个已有会话，不重放历史。答案是这个会话的句柄。
 
 ```viba apis
 resume_session =
-     void
+     types.Session
   <- $env Env
   <- $session_id types.SessionId
   <- $cwd str
-  <- { resume the session named by $session_id; the response's optional fields are not modeled, so this answers void }
+  <- { resume the session named by $session_id and answer its handle }
 ```
 
 ### load_session
 
-`session/load`：载入一个已有会话，重放它的历史。`$on_update` 接收重放出来的每条通知。
+`session/load`：载入一个已有会话，重放它的历史。`$on_update` 接收重放出来的每条通知；答案是这个会话的句柄。
 
 ```viba apis
 load_session =
-     void
+     types.Session
   <- $env Env
   <- $session_id types.SessionId
   <- $cwd str
   <- $on_update (void <- $env Env <- $notification types.SessionNotification)
-  <- { load the session named by $session_id, calling $on_update for each replayed session/update; the response's optional fields are not modeled, so this answers void }
+  <- { load the session named by $session_id, calling $on_update for each replayed session/update, and answer its handle }
 ```
 
 ### fork_session
 
 `session/fork`：把一个已有会话分叉成新会话，新会话带着源会话的历史，源会话不变；请求的选项与
-`session/load` 相同。
+`session/load` 相同。答案是新会话的句柄。
 
 ```viba apis
 fork_session =
-     types.SessionId
+     types.Session
   <- $env Env
-  <- $session_id types.SessionId
+  <- $session types.Session
   <- $cwd str
-  <- { fork the session named by $session_id and answer the new session's id }
+  <- { fork that session and answer the new session's handle }
 ```
 
 ### cancel_session
@@ -136,8 +143,8 @@ fork_session =
 cancel_session =
      void
   <- $env Env
-  <- $session_id types.SessionId
-  <- { cancel the turn running in the session named by $session_id }
+  <- $session types.Session
+  <- { cancel the turn running in that session }
 ```
 
 ### close_session
@@ -148,8 +155,8 @@ cancel_session =
 close_session =
      void
   <- $env Env
-  <- $session_id types.SessionId
-  <- { close the session named by $session_id }
+  <- $session types.Session
+  <- { close that session }
 ```
 
 ### delete_session
@@ -160,8 +167,8 @@ close_session =
 delete_session =
      void
   <- $env Env
-  <- $session_id types.SessionId
-  <- { delete the session named by $session_id }
+  <- $session types.Session
+  <- { delete that session }
 ```
 
 ### archive_session
@@ -172,8 +179,8 @@ delete_session =
 archive_session =
      void
   <- $env Env
-  <- $session_id types.SessionId
-  <- { archive the session named by $session_id }
+  <- $session types.Session
+  <- { archive that session }
 ```
 
 ### unarchive_session
@@ -184,8 +191,8 @@ archive_session =
 unarchive_session =
      void
   <- $env Env
-  <- $session_id types.SessionId
-  <- { unarchive the session named by $session_id }
+  <- $session types.Session
+  <- { unarchive that session }
 ```
 
 ### set_session_title
@@ -196,13 +203,74 @@ unarchive_session =
 set_session_title =
      void
   <- $env Env
-  <- $session_id types.SessionId
+  <- $session types.Session
   <- $title str
-  <- { set the title of the session named by $session_id }
+  <- { set that session's title }
 ```
 ## types.viba
 
 每个类型一节。
+
+### ContextVersion
+
+上下文版本：一次发布的 wiki 与 skills 的内容哈希。现在还没有上下文服务，所以 `AcpBackend` 里这一项是 nil。
+
+```viba types
+ContextVersion = str
+```
+
+### AcpBackend
+
+一个 ACP 后端：变体按后端实现分，现在是脚本化 agent、Claude、DeepSeek Harness 三种。
+
+```viba types
+AcpBackend =
+    Oneof
+  | ScriptedAgentBackend
+  | ClaudeAgentBackend
+  | DshAgentBackend
+```
+
+### ScriptedAgentBackend
+
+仓库里的脚本化 ACP agent，不接模型。`$context` 是这一实例带的上下文版本；还没有上下文服务，恒为 nil。
+
+```viba types
+ScriptedAgentBackend =
+    tagged[__type__, Object]
+  * $context Optional[ContextVersion]
+```
+
+### ClaudeAgentBackend
+
+Claude Agent SDK 的 ACP 适配器。`$context` 是这一实例带的上下文版本；还没有上下文服务，恒为 nil。
+
+```viba types
+ClaudeAgentBackend =
+    tagged[__type__, Object]
+  * $context Optional[ContextVersion]
+```
+
+### DshAgentBackend
+
+DeepSeek Harness 的 `acp` profile。`$context` 是这一实例带的上下文版本；还没有上下文服务，恒为 nil。
+
+```viba types
+DshAgentBackend =
+    tagged[__type__, Object]
+  * $context Optional[ContextVersion]
+```
+
+### Session
+
+一个会话句柄：它连的 ACP 后端（`AcpBackend`）与那个后端里的会话编号。会话上的操作都收它。
+
+```viba types
+Session =
+    Object
+  * $backend AcpBackend
+  * $session_id SessionId
+```
 
 ### SessionId
 

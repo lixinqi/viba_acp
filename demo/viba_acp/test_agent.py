@@ -5,7 +5,7 @@ JSON，和 `--trace` 里一行一条的 ACP 消息。预期：
 
 1) 程序得到 `ok`：trace 里一次 `session/prompt`，带 `session/update` 的文本与一个 `end_turn`；
 2) 一个服务进程只 `initialize` 一次、只开一个会话；
-3) 会话编号记在 `root/c0`，这一轮的响应记在 `root/c1`；
+3) 会话（后端 + 编号）记在 `root/c0`，这一轮的响应记在 `root/c1`；
 4) 同一个 store 再跑一次，一个 prompt 都不发：每一步都在 store 里回放了；
 5) 客户端自己的几条边角：工具调用与权限、提问超时会发 `session/cancel` 并拿到 `cancelled`；
    agent 报一个 ACP 没有的 stopReason，客户端拒绝它；agent 起不来，客户端报错而不是挂住；
@@ -35,6 +35,7 @@ from interpreter_support import Checks
 
 from distributed import service
 from viba.interpret import get_snapshot
+from viba.reflect import VibaReflectError
 
 import acp_client
 from run import read_modules
@@ -84,6 +85,15 @@ def snapshot(store: Path, path: str):
 
 def stop_reason_of(response) -> str:
     return response.by_tag("$stop_reason").value
+
+
+def has_tag(value, tag) -> bool:
+    """Whether this reflected value carries the member `tag`."""
+    try:
+        value.by_tag(tag)
+        return True
+    except VibaReflectError:
+        return False
 
 
 def run(tmp: Path):
@@ -139,6 +149,18 @@ def _one_schedule_runs_the_agent(tmp: Path):
     if first is not None:
         check(stop_reason_of(first) == "end_turn",
               f"the response ends with end_turn: {stop_reason_of(first)!r}")
+
+    session = snapshot(store, "root/c0")
+    check(session is not None, "the session is recorded under its call's path")
+    if session is not None:
+        check(session.by_tag("$session_id").value == "sess-1",
+              f"the recorded session names sess-1: "
+              f"{session.by_tag('$session_id').value!r}")
+        backend = session.by_tag("$backend")
+        check(has_tag(backend, "$ScriptedAgentBackend"),
+              f"the session's backend is the scripted agent variant: {backend!r}")
+        check(has_tag(backend, "$context"),
+              f"and carries its context slot: {backend!r}")
 
 
 
