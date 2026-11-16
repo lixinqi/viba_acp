@@ -4,9 +4,11 @@
 
 It runs `run.py --agent <name>` for `scripted`, `claude` and `dsh`, checks that
 the schedule reaches `ok` and that the agent streamed a non-empty answer, and
-prints the first line of each answer. `claude` and `dsh` are skipped when their
-commands are not on this machine; `claude` takes `ANTHROPIC_*` from this
-process's environment, `dsh` its credentials from `~/.dsh`.
+prints the first line of each answer. The session context reaches the agent either as
+the `session/new` `systemPrompt` field or, when the agent advertises no such
+capability, as the session's first prompt; both are checked here. `claude` and `dsh`
+are skipped when their commands are not on this machine; `claude` takes `ANTHROPIC_*`
+from this process's environment, `dsh` its credentials from `~/.dsh`.
 """
 
 import json
@@ -65,9 +67,20 @@ def main() -> int:
                           if message.get("id") == 1 and "result" in message}
             check(len(names_seen) == 1,
                   f"{agent}: the agent names itself: {names_seen!r}")
+            created = [message for message in messages
+                       if message.get("method") == "session/new"]
+            params = (created[0].get("params") or {}) if created else {}
+            carried = isinstance(params.get("systemPrompt"), dict)
+            prompts = [index for index, message in enumerate(messages)
+                       if message.get("method") == "session/prompt"]
+            check(len(prompts) == (1 if carried else 2),
+                  f"{agent}: the context takes "
+                  f"{'the systemPrompt field' if carried else 'a prompt turn'}: "
+                  f"{len(prompts)} prompts")
+            last = prompts[-1] if prompts else -1
             text = "".join(
                 message["params"]["update"]["content"]["text"]
-                for message in messages
+                for message in messages[last + 1:]
                 if message.get("method") == "session/update"
                 and message["params"]["update"].get("sessionUpdate")
                 == "agent_message_chunk")

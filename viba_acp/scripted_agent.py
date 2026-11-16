@@ -1,7 +1,7 @@
 """A scripted ACP agent: the agent side of the wire, with no model behind it.
 
 `acp_client.py` is the client side; this file is what it talks to in the demo and in
-the suite. It serves the three calls a client makes, and while serving a prompt it
+the suite. It answers the session calls a client makes, and while serving a prompt it
 runs the same tool-and-permission dance a real agent runs, so the client is exercised
 the way it would be against one:
 
@@ -23,7 +23,9 @@ client's timeout path is exercised. `--stop` makes the prompt response carry ano
 stop reason, to check that the client refuses a reason ACP does not define. `--protocol`
 reports another version in `initialize`, to check that the client refuses that too.
 `--tool-call` makes each turn run one tool call and ask the client to authorize it;
-without it a turn is text only, which is the demo's default.
+without it a turn is text only, which is the demo's default. `--no-system-prompt`
+withholds the `sessionCapabilities.systemPrompt` capability, so the client's fallback of
+sending the session context as the session's first prompt is exercised.
 """
 
 import argparse
@@ -48,12 +50,13 @@ def fail(message_id, code, text) -> None:
 class Agent:
     """One scripted agent process: the sessions it has, the prompt it is on."""
 
-    def __init__(self, name, mode, stop, protocol, tool_call):
+    def __init__(self, name, mode, stop, protocol, tool_call, system_prompt=True):
         self.name = name
         self.mode = mode
         self.stop = stop
         self.protocol = protocol
         self.tool_call = tool_call
+        self.system_prompt = system_prompt
         self.sessions = 0
         self.next_request = 1000
         self.pending = None
@@ -72,15 +75,22 @@ class Agent:
             self._fork_session(message)
         elif method == "session/prompt":
             self._prompt(message)
+        elif method == "session/load":
+            self._load_session(message)
+        elif method == "session/resume":
+            self._resume_session(message)
         elif method == "session/cancel":
             self._cancel()
         else:
             fail(message.get("id"), -32601, f"{method} is not a method of this agent")
 
     def _initialize(self, message) -> None:
+        capabilities = {}
+        if self.system_prompt:
+            capabilities["sessionCapabilities"] = {"systemPrompt": {}}
         respond(message["id"], {
             "protocolVersion": self.protocol,
-            "agentCapabilities": {},
+            "agentCapabilities": capabilities,
             "agentInfo": {"name": self.name, "title": "a scripted ACP agent",
                           "version": "1"},
             "authMethods": [],
@@ -93,6 +103,12 @@ class Agent:
     def _fork_session(self, message) -> None:
         self.sessions += 1
         respond(message["id"], {"sessionId": f"sess-{self.sessions}"})
+
+    def _resume_session(self, message) -> None:
+        respond(message["id"], {})
+
+    def _load_session(self, message) -> None:
+        respond(message["id"], {})
 
     def _prompt(self, message) -> None:
         params = message.get("params") or {}
@@ -180,9 +196,12 @@ def main(argv=None) -> int:
     parser.add_argument("--tool-call", action="store_true",
                         help="run one tool call per turn, and ask the client to "
                              "authorize it")
+    parser.add_argument("--no-system-prompt", action="store_true",
+                        help="do not advertise sessionCapabilities.systemPrompt, "
+                             "so the client falls back to a context prompt")
     options = parser.parse_args(argv)
     agent = Agent(options.name, options.mode, options.stop, options.protocol,
-                  options.tool_call)
+                  options.tool_call, not options.no_system_prompt)
     for line in sys.stdin:
         line = line.strip()
         if not line:

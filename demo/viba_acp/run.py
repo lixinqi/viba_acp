@@ -33,11 +33,21 @@ HOST = Path(os.environ.get("VIBA_ACP_HOST", str(ROOT.parent / "demo-viba"))).res
 
 DEFAULT_STORE = HERE / ".store"
 
-# The `AcpBackend` variant each `--agent` builds the demo with.
-BACKEND_VARIANTS = {
-    "scripted": "ScriptedAgentBackend",
-    "claude": "ClaudeAgentBackend",
-    "dsh": "DshAgentBackend",
+# The demo document builds the scripted backend; `--agent` swaps that variant name
+# for the implementation the run names. Every backend carries the same session context.
+BACKEND_SNIPPET = """session_context =
+    $wiki_path "../demo-viba/viba/viba/wiki"
+  * $version nil
+
+backend =
+    $ScriptedAgentBackend nil
+  * $context session_context"""
+
+BACKEND_SNIPPETS = {
+    "scripted": BACKEND_SNIPPET,
+    "claude": BACKEND_SNIPPET.replace("ScriptedAgentBackend",
+                                      "ClaudeAgentBackend"),
+    "dsh": BACKEND_SNIPPET.replace("ScriptedAgentBackend", "DshAgentBackend"),
 }
 
 
@@ -99,9 +109,8 @@ def build_source(store: Path, agent: str) -> Path:
     `<source>/viba_acp/`, the demo's program under `<source>/`; the documents stay
     the source, this directory is a build product.
 
-    The demo document constructs the `ScriptedAgentBackend`; `--agent` swaps that
-    variant name for the chosen implementation, so the same program drives the agent
-    the run asks for.
+    The demo document builds the scripted backend; `--agent` swaps that block for the
+    chosen implementation, so the same program drives the agent the run asks for.
     """
     source = store / "source" / "viba_acp"
     source.mkdir(parents=True, exist_ok=True)
@@ -113,8 +122,8 @@ def build_source(store: Path, agent: str) -> Path:
             (directory / name).write_text(text, encoding="utf-8")
     entry = source / "explain_then_shorten.viba"
     text = entry.read_text(encoding="utf-8")
-    entry.write_text(text.replace("ScriptedAgentBackend",
-                                  BACKEND_VARIANTS[agent]), encoding="utf-8")
+    entry.write_text(text.replace(BACKEND_SNIPPET, BACKEND_SNIPPETS[agent]),
+                     encoding="utf-8")
     return entry
 
 

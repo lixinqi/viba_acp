@@ -21,9 +21,14 @@ requests by policy: nobody is sitting in front of this process to be asked, so t
 default is to reject. `permissions="allow"` is the caller saying it has decided, for
 this whole run, that the agent may go ahead.
 
-One `Conversation` is one agent process and one ACP session: `initialize` and
-`session/new` happen once, and every `prompt` is one more turn on that session.
-`run_turn` is the one-shot form, for trying an agent by hand.
+A session's context is delivered the way the agent can take it: as the ACP
+`systemPrompt` (append mode) when the agent advertises
+`sessionCapabilities.systemPrompt`, and as the session's first prompt when it does not;
+that fallback's answer is dropped.
+
+One `Conversation` is one agent process and the sessions it has live: `initialize`
+happens once, `new_session` opens a session, and every `prompt` is one more turn on one
+of them. `run_turn` is the one-shot form, for trying an agent by hand.
 
     python3 viba_acp/scripted_agent.py     # the scripted agent used by the demo
 """
@@ -121,6 +126,7 @@ class Client:
         self.timeout = DEFAULT_TIMEOUT if timeout is None else float(timeout)
         self.trace = _Trace(trace)
         self.agent_info = AgentInfo()
+        self.capabilities = {}
         self.decisions = []
         self._incoming = queue.Queue()
         self._responses = {}
@@ -159,14 +165,27 @@ class Client:
             name=str(info.get("name") or ""),
             title=str(info.get("title") or ""),
             version=str(info.get("version") or ""))
+        self.capabilities = result.get("agentCapabilities") or {}
         return result
 
-    def new_session(self) -> str:
-        """`session/new`: one conversation, at the working directory this side gives."""
-        result = self.request("session/new", {"cwd": self.cwd, "mcpServers": []})
+    def new_session(self, system_prompt: str = None) -> str:
+        """`session/new`: one conversation, at the working directory this side gives.
+
+        `system_prompt`, when given, goes to the agent as its ACP `systemPrompt` in
+        `append` mode. An agent that does not advertise
+        `sessionCapabilities.systemPrompt` gets the same text as the session's first
+        prompt instead; that answer is dropped.
+        """
+        params = {"cwd": self.cwd, "mcpServers": []}
+        supported = self.supports_system_prompt()
+        if system_prompt is not None and supported:
+            params["systemPrompt"] = self.the_system_prompt(system_prompt)
+        result = self.request("session/new", params)
         session = result.get("sessionId")
         if not isinstance(session, str) or not session:
             raise AcpError("session/new reported no sessionId")
+        if system_prompt is not None and not supported:
+            self.give_context(session, system_prompt)
         return session
 
     def prompt(self, session: str, blocks: list, on_update=None) -> tuple:
@@ -196,23 +215,54 @@ class Client:
                            f"which is not an ACP stop reason")
         return "".join(self._text), stop
 
-    def resume_session(self, session: str, cwd: str) -> None:
-        """`session/resume`: reconnect to a session the agent already has."""
-        self.request("session/resume", {"sessionId": session, "cwd": cwd,
-                                        "mcpServers": []})
+    def resume_session(self, session: str, cwd: str,
+                       system_prompt: str = None) -> None:
+        """`session/resume`: reconnect to a session the agent already has.
 
-    def load_session(self, session: str, cwd: str, on_update=None) -> None:
+        `system_prompt` is delivered the way `new_session` delivers it: as the ACP
+        `systemPrompt`, or as the session's next prompt when the agent takes none.
+        """
+        params = {"sessionId": session, "cwd": cwd, "mcpServers": []}
+        supported = self.supports_system_prompt()
+        if system_prompt is not None and supported:
+            params["systemPrompt"] = self.the_system_prompt(system_prompt)
+        self.request("session/resume", params)
+        if system_prompt is not None and not supported:
+            self.give_context(session, system_prompt)
+
+    def supports_system_prompt(self) -> bool:
+        """Whether the agent advertises `sessionCapabilities.systemPrompt`."""
+        sessions = self.capabilities.get("sessionCapabilities") or {}
+        return isinstance(sessions.get("systemPrompt"), dict)
+
+    def the_system_prompt(self, text: str) -> dict:
+        """One text as an ACP `systemPrompt`, appended to the agent's instructions."""
+        return {"mode": "append",
+                "content": [{"type": "text", "text": text}]}
+
+    def give_context(self, session: str, text: str) -> None:
+        """Deliver context as one prompt turn; that answer is dropped."""
+        self.prompt(session, [{"type": "text", "text": text}])
+
+    def load_session(self, session: str, cwd: str, on_update=None,
+                     system_prompt: str = None) -> None:
         """`session/load`: reconnect to a session, replaying its history.
 
         The agent sends the history as `session/update` notifications before the
         response; `on_update`, when given, is called with each of them.
+        `system_prompt` is delivered the way `new_session` delivers it.
         """
+        params = {"sessionId": session, "cwd": cwd, "mcpServers": []}
+        supported = self.supports_system_prompt()
+        if system_prompt is not None and supported:
+            params["systemPrompt"] = self.the_system_prompt(system_prompt)
         self._on_update = on_update
         try:
-            self.request("session/load", {"sessionId": session, "cwd": cwd,
-                                          "mcpServers": []})
+            self.request("session/load", params)
         finally:
             self._on_update = None
+        if system_prompt is not None and not supported:
+            self.give_context(session, system_prompt)
 
     def fork_session(self, session: str, cwd: str) -> str:
         """`session/fork`: a new session that carries this one's history."""
@@ -433,10 +483,21 @@ class Conversation:
         self.client = Client(command, cwd, permissions=permissions,
                              timeout=timeout, trace=trace, env=env)
         self.client.initialize()
-        self.session = self.client.new_session()
-        # The sessions this connection has live: the first one, and every later
-        # one it resumed, loaded or forked.
-        self.sessions = {self.session}
+        self.session = None
+        # The sessions this connection has live: every one it created, resumed,
+        # loaded or forked.
+        self.sessions = set()
+
+    def new_session(self, system_prompt: str = None) -> str:
+        """`session/new`: open a session, make it live, and answer its id."""
+        return self.remember_session(self.client.new_session(system_prompt))
+
+    def remember_session(self, session: str) -> str:
+        """Make one session live on this connection."""
+        self.sessions.add(session)
+        if self.session is None:
+            self.session = session
+        return session
 
     @property
     def agent(self) -> AgentInfo:
@@ -452,23 +513,26 @@ class Conversation:
 
     def prompt_blocks(self, blocks: list, on_update=None) -> tuple:
         """One more turn on this conversation's first session."""
+        if self.session is None:
+            raise RuntimeError(
+                "this conversation has no session yet; call new_session first")
         return self.client.prompt(self.session, blocks, on_update)
 
-    def resume_session(self, session: str, cwd: str) -> None:
+    def resume_session(self, session: str, cwd: str,
+                       system_prompt: str = None) -> None:
         """`session/resume`: reconnect to a session the agent already has."""
-        self.client.resume_session(session, cwd)
-        self.sessions.add(session)
+        self.client.resume_session(session, cwd, system_prompt)
+        self.remember_session(session)
 
-    def load_session(self, session: str, cwd: str, on_update=None) -> None:
+    def load_session(self, session: str, cwd: str, on_update=None,
+                     system_prompt: str = None) -> None:
         """`session/load`: reconnect to a session, replaying its history."""
-        self.client.load_session(session, cwd, on_update)
-        self.sessions.add(session)
+        self.client.load_session(session, cwd, on_update, system_prompt)
+        self.remember_session(session)
 
     def fork_session(self, session: str, cwd: str) -> str:
         """`session/fork`: a new session that carries this one's history."""
-        forked = self.client.fork_session(session, cwd)
-        self.sessions.add(forked)
-        return forked
+        return self.remember_session(self.client.fork_session(session, cwd))
 
     def find_session(self, session: str) -> str:
         """The named session, if this conversation has it live."""

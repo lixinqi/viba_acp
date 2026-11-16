@@ -9,7 +9,9 @@ JSON，和 `--trace` 里一行一条的 ACP 消息。预期：
 4) 同一个 store 再跑一次，一个 prompt 都不发：每一步都在 store 里回放了；
 5) 客户端自己的几条边角：工具调用与权限、提问超时会发 `session/cancel` 并拿到 `cancelled`；
    agent 报一个 ACP 没有的 stopReason，客户端拒绝它；agent 起不来，客户端报错而不是挂住；
-6) 分叉：`session/fork` 给出新的会话编号，新会话与源会话都能继续 prompt。
+6) 分叉：`session/fork` 给出新的会话编号，新会话与源会话都能继续 prompt；
+7) 后端的会话上下文里的 `wiki_path` 写进 `session/new`、`session/load`、`session/resume` 的 system prompt；
+8) 不收 system prompt 的 agent：上下文改成一建/接/载会话后的提示（`session/prompt`），答案丢弃。
 
     python3 demo/viba_acp/test_agent.py
 """
@@ -45,6 +47,8 @@ check = checks.check
 
 RUN = [sys.executable, str(HERE / "run.py")]
 SCRIPTED_AGENT = [sys.executable, str(LAYER / "scripted_agent.py")]
+WIKI_PATH = "/tmp/viba-wiki"
+WIKI_PROMPT = f"The project wiki is at {WIKI_PATH}."
 
 
 def run_demo(store: Path, trace: Path, *extra: str):
@@ -103,6 +107,8 @@ def run(tmp: Path):
     _the_permission_path()
     _the_update_callback()
     _the_fork_path()
+    _the_session_context()
+    _the_context_fallback()
     _the_client_edges()
 
 
@@ -118,6 +124,14 @@ def _one_schedule_runs_the_agent(tmp: Path):
     check(len(requests(trace, "initialize")) == 1,
           f"the service process initializes once: "
           f"{len(requests(trace, 'initialize'))}")
+    created = requests(trace, "session/new")
+    prompt = ((created[0].get("params") or {}).get("systemPrompt") or {}
+              if created else {})
+    prompt_text = "".join(part.get("text") or ""
+                          for part in prompt.get("content") or [])
+    check(prompt.get("mode") == "append"
+          and "../demo-viba/viba/viba/wiki" in prompt_text,
+          f"session/new carries the backend's wiki_path in the system prompt: {prompt!r}")
     check(len(requests(trace, "session/new")) == 1,
           f"and keeps one session: {len(requests(trace, 'session/new'))}")
     session_ids = {(message.get("params") or {}).get("sessionId")
@@ -159,8 +173,10 @@ def _one_schedule_runs_the_agent(tmp: Path):
         backend = session.by_tag("$backend")
         check(has_tag(backend, "$ScriptedAgentBackend"),
               f"the session's backend is the scripted agent variant: {backend!r}")
-        check(has_tag(backend, "$context"),
-              f"and carries its context slot: {backend!r}")
+        context = backend.by_tag("$context")
+        check(context.by_tag("$wiki_path").value
+              == "../demo-viba/viba/viba/wiki",
+              f"the session's context names the wiki: {context!r}")
 
 
 
@@ -237,6 +253,7 @@ def _the_permission_path():
 def _the_update_callback():
     """The client hands each session/update to the callback it was given."""
     with acp_client.Conversation(SCRIPTED_AGENT, str(ROOT)) as conversation:
+        conversation.new_session()
         seen = []
         text, stop = conversation.prompt_blocks(
             [{"type": "text", "text": "hello"}], seen.append)
@@ -253,6 +270,7 @@ def _the_fork_path():
         trace = Path(scratch) / "fork.jsonl"
         with acp_client.Conversation(SCRIPTED_AGENT, str(ROOT),
                                      trace=trace) as conversation:
+            conversation.new_session()
             source = conversation.session
             forked = conversation.fork_session(source, str(ROOT))
             check(forked != source, f"the fork has its own id: {forked!r}")
@@ -268,6 +286,51 @@ def _the_fork_path():
         params = (forks[0].get("params") or {}) if forks else {}
         check(params.get("sessionId") == source and params.get("cwd") == str(ROOT),
               f"the request names the source session and the cwd: {params!r}")
+
+
+def _the_session_context():
+    """The backend's wiki_path reaches the agent on new, load and resume."""
+    with tempfile.TemporaryDirectory(prefix="viba-acp-context-") as scratch:
+        trace = Path(scratch) / "context.jsonl"
+        with acp_client.Conversation(SCRIPTED_AGENT, str(ROOT),
+                                     trace=trace) as conversation:
+            session = conversation.new_session(WIKI_PROMPT)
+            conversation.load_session(session, str(ROOT),
+                                      system_prompt=WIKI_PROMPT)
+            conversation.resume_session(session, str(ROOT), WIKI_PROMPT)
+        for method in ("session/new", "session/load", "session/resume"):
+            sent = requests(trace, method)
+            check(len(sent) == 1, f"{method} happens once: {len(sent)}")
+            prompt = ((sent[0].get("params") or {}).get("systemPrompt") or {}
+                      if sent else {})
+            text = "".join(part.get("text") or ""
+                           for part in prompt.get("content") or [])
+            check(prompt.get("mode") == "append" and WIKI_PATH in text,
+                  f"{method} carries the wiki_path in the system prompt: {prompt!r}")
+
+
+def _the_context_fallback():
+    """An agent without systemPrompt gets the context as a prompt turn each time."""
+    agent = SCRIPTED_AGENT + ["--no-system-prompt"]
+    with tempfile.TemporaryDirectory(prefix="viba-acp-fallback-") as scratch:
+        trace = Path(scratch) / "fallback.jsonl"
+        with acp_client.Conversation(agent, str(ROOT), trace=trace) as conversation:
+            session = conversation.new_session(WIKI_PROMPT)
+            conversation.load_session(session, str(ROOT),
+                                      system_prompt=WIKI_PROMPT)
+            conversation.resume_session(session, str(ROOT), WIKI_PROMPT)
+        for method in ("session/new", "session/load", "session/resume"):
+            sent = requests(trace, method)
+            params = (sent[0].get("params") or {}) if sent else {}
+            check(bool(sent) and "systemPrompt" not in params,
+                  f"{method} carries no systemPrompt: {params!r}")
+        given = requests(trace, "session/prompt")
+        check(len(given) == 3, f"the context goes as three prompt turns: {len(given)}")
+        texts = ["".join(block.get("text") or ""
+                         for block in (message.get("params") or {}).get("prompt") or [])
+                 for message in given]
+        check(all(WIKI_PATH in text for text in texts),
+              f"each context prompt names the wiki: {texts!r}")
 
 
 def _the_client_edges():

@@ -18,6 +18,10 @@ ACP 是客户端与 agent 之间的会话协议。服务启动 agent 进程，`i
 （`AcpBackend`，示例里是 `ScriptedAgentBackend`）与后端的会话编号（`SessionId`）；会话本身保存在宿主的
 `Conversation` 中（[`acp_client.py`](acp_client.py)），随服务进程结束而关闭。示例开一个会话、执行一轮。
 
+后端的会话上下文（`AgentSessionContext`）里的 `wiki_path` 在开会话、载入会话与接回会话时交给 agent：
+agent 声明了 `sessionCapabilities.systemPrompt` 就作为 system prompt 发；没声明（dsh 当前如此）就先发一轮
+上下文提示，答案丢弃。
+
 接口的类型名取自 ACP 的 schema，操作名对应 ACP 的方法：`new_session` 是 `session/new`，`send_prompt` 是
 `session/prompt`。
 
@@ -29,7 +33,8 @@ ACP 是客户端与 agent 之间的会话协议。服务启动 agent 进程，`i
 三条约定：
 
 1. **每个操作先收环境。** `$env Env` 是第一个参数，与 viba 的其他调用一致；开会话与接回还要给
-   `AcpBackend`，其余参数由服务决定（工作目录、MCP 服务器），viba 一侧不传。
+   `AcpBackend`，后端上下文里的 `wiki_path` 会写进 system prompt，其余参数由服务决定（工作目录、MCP
+   服务器），viba 一侧不传。
 2. **会话是数据。** `new_session` 的答案是 `Session`（后端 + 编号）；`send_prompt` 收 `$session Session`
    与一组 `ContentBlock`，在它所指的会话上执行。
 3. **返回值是 `PromptResponse`。** 结束原因在 `$stop_reason`，token 用量在 `$usage`；消息文本不在
@@ -50,9 +55,9 @@ store 默认按 agent 分开（`demo/viba_acp/.store/<agent>`），同一份程�
 
 `run.py` 把两份 `.viba.md` 文档按 `viba <name>` 代码块拼成模块：接口文档的 `viba public`/`viba types`/
 `viba apis` 落到 `<store>/source/viba_acp/viba_acp/` 下的三个文件，块外的说明成为该文件的注释；示例程序
-按标题落到 `<store>/source/viba_acp/explain_then_shorten.viba`。示例程序里 `backend` 写的是
-`ScriptedAgentBackend`；`--agent claude`/`dsh` 在建模块时把这个变体名换成 `ClaudeAgentBackend`/
-`DshAgentBackend`，所以同一份程序能跑三种 agent。然后
+按标题落到 `<store>/source/viba_acp/explain_then_shorten.viba`。示例程序构造的 `backend` 带会话上下文
+（`$wiki_path`）；`--agent` 在建模块时把变体换成对应实现，三种后端都带同一个上下文，agent 收不收 system
+prompt 由客户端处理（见第 1 节），所以同一份程序能跑三种 agent。然后
 启动 [`distributed/scheduler.py`](../../demo-viba/distributed/scheduler.py) 与一个服务进程（`agent_service`）。它产出
 两项结果：
 
@@ -71,9 +76,13 @@ __decl__ = viba_acp.PromptResponse <- $env Env
 
 args = __get_args__ << __decl__
 
+session_context =
+    $wiki_path "../demo-viba/viba/viba/wiki"
+  * $version nil
+
 backend =
     $ScriptedAgentBackend nil
-  * $context nil
+  * $context session_context
 
 session = viba_acp.new_session << $env ($sub_env << args.env << "c0") << $backend backend
 
@@ -93,6 +102,10 @@ __impl__ =
   << $prompt (ListLiteral[question])
   << $on_update on_notification
 ```
+
+`session_context` 里的 `wiki_path` 由服务交给会话：agent 收 system prompt 就作为 `session/new`、
+`session/load`、`session/resume` 的 `systemPrompt`（`append` 模式）发，不收就在建/接/载会话后补一轮
+上下文提示。
 
 `$on_update` 是函数型参数，和 `if` 的分支一样，实参写成一个**仍欠环境的那次调用**（`on_notification`）；服务持有的是这个调用，不是它的值。每条通知到达时，服务为它建一个子环境、再用一次新的调用对象去跑；`_HostArgument` 一次只答一次，同一份对象不能拿来跑第二条。示例里的 `on_notification` 是宿主实现的一步，`agent_service.py` 把每条通知记到 trace 旁边（`<trace>.updates`）。
 

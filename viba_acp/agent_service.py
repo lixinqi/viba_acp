@@ -47,10 +47,12 @@ def the_api(service):
 
     def new_session(environ, backend):
         agent = the_backend_agent(backend)
+        value = the_backend(backend)
+        wiki = the_wiki_prompt(backend)
         return service.recorded(
             environ,
-            lambda: the_session_value(backend.data,
-                                      the_conversation(agent).session))
+            lambda: the_session_value(
+                value, the_conversation(agent).new_session(wiki)))
 
     def send_prompt(environ, session, prompt_blocks, on_update):
         agent, session_id = the_session(session)
@@ -66,30 +68,34 @@ def the_api(service):
 
     def resume_session(environ, backend, session_id, cwd):
         agent = the_backend_agent(backend)
+        value = the_backend(backend)
+        wiki = the_wiki_prompt(backend)
         session_id = leaf_value(session_id)
         cwd = leaf_value(cwd)
 
         def resume():
-            the_conversation(agent).resume_session(session_id, cwd)
-            return the_session_value(backend.data, session_id)
+            the_conversation(agent).resume_session(session_id, cwd, wiki)
+            return the_session_value(value, session_id)
 
         return service.recorded(environ, resume)
 
     def load_session(environ, backend, session_id, cwd, on_update):
         agent = the_backend_agent(backend)
+        value = the_backend(backend)
+        wiki = the_wiki_prompt(backend)
         session_id = leaf_value(session_id)
         cwd = leaf_value(cwd)
         handler = the_handler(on_update, environ)
 
         def load():
-            the_conversation(agent).load_session(session_id, cwd, handler)
-            return the_session_value(backend.data, session_id)
+            the_conversation(agent).load_session(session_id, cwd, handler, wiki)
+            return the_session_value(value, session_id)
 
         return service.recorded(environ, load)
 
     def fork_session(environ, session, cwd):
         agent, parent = the_session(session)
-        backend = session.by_tag("$backend").data
+        backend = the_backend(session.by_tag("$backend"))
         cwd = leaf_value(cwd)
 
         def fork():
@@ -222,6 +228,15 @@ def the_has(block, tag) -> bool:
         return False
 
 
+def the_wiki_prompt(backend):
+    """The system prompt one backend's session context asks for, or None."""
+    context = the_context(backend)
+    if context is None:
+        return None
+    wiki_path = leaf_value(context.by_tag("$wiki_path"))
+    return f"The project wiki is at {wiki_path}."
+
+
 def the_annotations(value):
     """One `Annotations` as the ACP wire form."""
     piece = {}
@@ -327,18 +342,53 @@ def the_response(conversation, session, blocks, on_update=None):
     ]))
 
 
-def the_backend_agent(backend):
-    """The agent one `AcpBackend` argument names."""
-    for tag, agent in _BACKEND_AGENTS.items():
+def the_backend(backend):
+    """One `AcpBackend` argument, as a fresh node the store can serialize."""
+    members = [viba_ast.Tagged(the_backend_tag(backend), viba_ast.Nil())]
+    context = the_context(backend)
+    if context is not None:
+        members.append(viba_ast.Tagged("$context", the_context_node(context)))
+    return viba_ast.ProductChain(members)
+
+
+def the_backend_tag(backend):
+    """The variant tag naming one `AcpBackend` argument."""
+    for tag in _BACKEND_AGENTS:
         if the_has(backend, tag):
-            return agent
+            return tag
     raise RuntimeError(
         f"unknown ACP backend; this service drives "
         f"{', '.join(sorted(_BACKEND_AGENTS))}")
 
 
+def the_backend_agent(backend):
+    """The agent one `AcpBackend` argument names."""
+    return _BACKEND_AGENTS[the_backend_tag(backend)]
+
+
+def the_context(backend):
+    """The `AgentSessionContext` one backend carries, or None."""
+    try:
+        return backend.by_tag("$context")
+    except VibaReflectError:
+        return None
+
+
+def the_context_node(context):
+    """One `AgentSessionContext` argument, as a fresh node."""
+    version = leaf_value(context.by_tag("$version"))
+    return viba_ast.ProductChain([
+        viba_ast.Tagged("$wiki_path",
+                        viba_ast.Constant(
+                            leaf_value(context.by_tag("$wiki_path")))),
+        viba_ast.Tagged("$version",
+                        viba_ast.Nil() if version is None
+                        else viba_ast.Constant(version)),
+    ])
+
+
 def the_session_value(backend, session):
-    """One session, as the interface's `Session`: its backend and its id."""
+    """One session, as the interface's `Session`: its backend node and its id."""
     return viba_data(viba_ast.ProductChain([
         viba_ast.Tagged("$backend", backend),
         viba_ast.Tagged("$session_id", viba_ast.Constant(session)),

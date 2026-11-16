@@ -31,6 +31,7 @@ AcpBackend = types.AcpBackend
 ScriptedAgentBackend = types.ScriptedAgentBackend
 ClaudeAgentBackend = types.ClaudeAgentBackend
 DshAgentBackend = types.DshAgentBackend
+AgentSessionContext = types.AgentSessionContext
 ContextVersion = types.ContextVersion
 SessionId = types.SessionId
 MessageId = types.MessageId
@@ -72,14 +73,15 @@ import viba_acp.types as types
 
 ### new_session
 
-`session/new`：在给定的 ACP 后端上开一个会话。工作目录与 MCP 服务器属于客户端的策略，由服务决定。
+`session/new`：在给定的 ACP 后端上开一个会话。工作目录与 MCP 服务器属于客户端的策略，由服务决定；
+后端上下文里的 `wiki_path` 交给会话（agent 收 system prompt 就作为它发，不收则建会话后补一轮上下文提示）。
 
 ```viba apis
 new_session =
      types.Session
   <- $env Env
   <- $backend types.AcpBackend
-  <- { open a new ACP session on that backend and answer its handle }
+  <- { open a new ACP session on that backend, hand its session context to the agent, and answer its handle }
 ```
 
 ### send_prompt
@@ -98,7 +100,8 @@ send_prompt =
 
 ### resume_session
 
-`session/resume`：在给定的后端上接上一个已有会话，不重放历史。答案是这个会话的句柄。
+`session/resume`：在给定的后端上接上一个已有会话，不重放历史；后端上下文里的 `wiki_path` 同样交给会话
+（agent 收 system prompt 就作为它发，不收则补一轮上下文提示）。答案是这个会话的句柄。
 
 ```viba apis
 resume_session =
@@ -107,12 +110,14 @@ resume_session =
   <- $backend types.AcpBackend
   <- $session_id types.SessionId
   <- $cwd str
-  <- { resume the session named by $session_id on that backend and answer its handle }
+  <- { resume the session named by $session_id on that backend, hand its session context to the agent, and answer its handle }
 ```
 
 ### load_session
 
-`session/load`：在给定的后端上载入一个已有会话，重放它的历史。`$on_update` 接收重放出来的每条通知；答案是这个会话的句柄。
+`session/load`：在给定的后端上载入一个已有会话，重放它的历史。`$on_update` 接收重放出来的每条通知；
+后端上下文里的 `wiki_path` 同样交给会话（agent 收 system prompt 就作为它发，不收则补一轮上下文提示）。
+答案是这个会话的句柄。
 
 ```viba apis
 load_session =
@@ -122,7 +127,7 @@ load_session =
   <- $session_id types.SessionId
   <- $cwd str
   <- $on_update (void <- $env Env <- $notification types.SessionNotification)
-  <- { load the session named by $session_id on that backend, calling $on_update for each replayed session/update, and answer its handle }
+  <- { load the session named by $session_id on that backend, calling $on_update for each replayed session/update, hand its session context to the agent, and answer its handle }
 ```
 
 ### fork_session
@@ -217,10 +222,22 @@ set_session_title =
 
 ### ContextVersion
 
-上下文版本：一次发布的 wiki 与 skills 的内容哈希。现在还没有上下文服务，所以 `AcpBackend` 里这一项是 nil。
+上下文版本：一次发布的 wiki 与 skills 的内容哈希。
 
 ```viba types
 ContextVersion = str
+```
+
+### AgentSessionContext
+
+一个会话的上下文：wiki 的路径，与可选的上下文版本。开会话、载入会话与接回会话时，服务把 `$wiki_path`
+交给会话：agent 收 system prompt 就作为它发，不收就在建会话后补一轮上下文提示。
+
+```viba types
+AgentSessionContext =
+    Object
+  * $wiki_path str
+  * $version Optional[ContextVersion]
 ```
 
 ### AcpBackend
@@ -237,32 +254,33 @@ AcpBackend =
 
 ### ScriptedAgentBackend
 
-仓库里的脚本化 ACP agent，不接模型。`$context` 是这一实例带的上下文版本；还没有上下文服务，恒为 nil。
+仓库里的脚本化 ACP agent，不接模型。`$context` 是这一实例的会话上下文。
 
 ```viba types
 ScriptedAgentBackend =
     tagged[__type__, Object]
-  * $context Optional[ContextVersion]
+  * $context AgentSessionContext
 ```
 
 ### ClaudeAgentBackend
 
-Claude Agent SDK 的 ACP 适配器。`$context` 是这一实例带的上下文版本；还没有上下文服务，恒为 nil。
+Claude Agent SDK 的 ACP 适配器。`$context` 是这一实例的会话上下文。
 
 ```viba types
 ClaudeAgentBackend =
     tagged[__type__, Object]
-  * $context Optional[ContextVersion]
+  * $context AgentSessionContext
 ```
 
 ### DshAgentBackend
 
-DeepSeek Harness 的 `acp` profile。`$context` 是这一实例带的上下文版本；还没有上下文服务，恒为 nil。
+DeepSeek Harness 的 `acp` profile。`$context` 是这一实例的会话上下文；它的 ACP 不接受 system prompt，
+所以服务在建会话后先发一轮上下文提示。
 
 ```viba types
 DshAgentBackend =
     tagged[__type__, Object]
-  * $context Optional[ContextVersion]
+  * $context AgentSessionContext
 ```
 
 ### Session
