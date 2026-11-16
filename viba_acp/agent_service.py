@@ -53,10 +53,12 @@ def the_api(service):
             lambda: the_session_value(
                 value, the_conversation(agent).new_session(wiki)))
 
-    def send_prompt(environ, session, prompt_blocks, on_update):
+    def send_prompt(environ, session, prompt_blocks, on_update,
+                    sub_env_prefix_on_update):
         agent, session_id = the_session(session)
         blocks = [the_block(block) for block in prompt_blocks]
-        handler = the_handler(on_update, environ)
+        handler = the_handler(on_update, environ,
+                              leaf_value(sub_env_prefix_on_update))
 
         def turn():
             conversation = the_conversation(agent)
@@ -78,13 +80,15 @@ def the_api(service):
 
         return service.recorded(environ, resume)
 
-    def load_session(environ, backend, session_id, cwd, on_update):
+    def load_session(environ, backend, session_id, cwd, on_update,
+                     sub_env_prefix_on_update):
         agent = the_backend_agent(backend)
         value = the_backend(backend)
         wiki = the_wiki_prompt(backend)
         session_id = leaf_value(session_id)
         cwd = leaf_value(cwd)
-        handler = the_handler(on_update, environ)
+        handler = the_handler(on_update, environ,
+                              leaf_value(sub_env_prefix_on_update))
 
         def load():
             the_conversation(agent).load_session(session_id, cwd, handler, wiki)
@@ -259,7 +263,7 @@ def the_optional(block, tag):
         return None
 
 
-def the_handler(on_update, environ):
+def the_handler(on_update, environ, prefix):
     """The viba function the client calls for each `session/update`, or None."""
     if isinstance(on_update, VObject) and isinstance(on_update.data, viba_ast.Nil):
         return None
@@ -279,7 +283,7 @@ def the_handler(on_update, environ):
                              file=on_update.file,
                              source_module=on_update.source_module,
                              name=on_update.name, origin=on_update.origin)
-        call(sub_env(environ, f"update{count[0]}"), piece)
+        call(sub_env(environ, f"{prefix}{count[0]}"), piece)
 
     return handler
 

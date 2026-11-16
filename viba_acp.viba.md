@@ -85,7 +85,7 @@ new_session =
 
 ### send_prompt
 
-`session/prompt`：在一个会话上执行一轮。`$on_update` 在每条 `session/update` 到达时被调用；实参写成仍欠环境的那次调用（如 `on_notification`），服务为每条通知建一个子环境去跑它。
+`session/prompt`：在一个会话上执行一轮。`$on_update` 在每条 `session/update` 到达时被调用；实参写成仍欠环境的那次调用（如 `on_notification`），服务为每条通知建一个子环境去跑它。`$sub_env_prefix_on_update` 是那个子环境的名字前缀；同一个环境下换前缀，两条回调就不会共用数据路径。
 
 ```viba apis
 send_prompt =
@@ -94,7 +94,8 @@ send_prompt =
   <- $session types.Session
   <- $prompt list[types.ContentBlock]
   <- $on_update (void <- $env Env <- $notification types.SessionNotification)
-  <- { run one prompt turn on that session, calling $on_update for each session/update, and answer its response }
+  <- $sub_env_prefix_on_update str
+  <- { run one prompt turn on that session, calling $on_update for each session/update in a sub-environment named after $sub_env_prefix_on_update, and answer its response }
 ```
 
 ### resume_session
@@ -114,9 +115,9 @@ resume_session =
 
 ### load_session
 
-`session/load`：在给定的后端上载入一个已有会话，重放它的历史。`$on_update` 接收重放出来的每条通知；
-后端上下文里的 `wiki_path` 同样交给会话（agent 收 system prompt 就作为它发，不收则补一轮上下文提示）。
-答案是这个会话的句柄。
+`session/load`：在给定的后端上载入一个已有会话，重放它的历史。`$on_update` 接收重放出来的每条通知，
+每条在 `$sub_env_prefix_on_update` 命名的子环境里跑；后端上下文里的 `wiki_path`
+同样交给会话（agent 收 system prompt 就作为它发，不收则补一轮上下文提示）。答案是这个会话的句柄。
 
 ```viba apis
 load_session =
@@ -126,7 +127,8 @@ load_session =
   <- $session_id types.SessionId
   <- $cwd str
   <- $on_update (void <- $env Env <- $notification types.SessionNotification)
-  <- { load the session named by $session_id on that backend, calling $on_update for each replayed session/update, hand its session context to the agent, and answer its handle }
+  <- $sub_env_prefix_on_update str
+  <- { load the session named by $session_id on that backend, calling $on_update for each replayed session/update in a sub-environment named after $sub_env_prefix_on_update, hand its session context to the agent, and answer its handle }
 ```
 
 ### fork_session

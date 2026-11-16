@@ -24,6 +24,7 @@ credentials from `~/.dsh`.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -210,6 +211,13 @@ def check_one(agent: str, scratch: Path) -> str:
         if value is not None:
             check(value.by_tag("$stop_reason").value == "end_turn",
                   f"{agent}: the response at {path} ends with end_turn")
+
+    for path, prefix in (("root/c2", "update"), ("root/c3", "note")):
+        names = sorted(child.parent.name
+                       for child in (store / path).glob("*/value.viba"))
+        check(bool(names) and all(re.fullmatch(rf"{prefix}\d+", name)
+                                  for name in names),
+              f"{agent}: the updates at {path} use the {prefix!r} prefix: {names!r}")
 
     outcome = lines[-1] if lines else {}
     check(str(outcome.get("value", "")).count("$stop_reason") == 2,

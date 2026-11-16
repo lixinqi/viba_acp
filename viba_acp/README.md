@@ -125,6 +125,7 @@ answer_a =
   << $session session_a
   << $prompt (ListLiteral[question])
   << $on_update on_notification
+  << $sub_env_prefix_on_update "update"
 
 answer_b =
      viba_acp.send_prompt
@@ -132,6 +133,7 @@ answer_b =
   << $session session_b
   << $prompt (ListLiteral[question])
   << $on_update on_notification
+  << $sub_env_prefix_on_update "note"
 
 __impl__ = answer_a * answer_b
 ```
@@ -141,6 +143,9 @@ __impl__ = answer_a * answer_b
 上下文提示（只要它记下，不要用工具、不要作答）。
 
 `$on_update` 是函数型参数，和 `if` 的分支一样，实参写成一个**仍欠环境的那次调用**（`on_notification`）；服务持有的是这个调用，不是它的值。每条通知到达时，服务为它建一个子环境、再用一次新的调用对象去跑；`_HostArgument` 一次只答一次，同一份对象不能拿来跑第二条。示例里的 `on_notification` 是宿主实现的一步，`agent_service.py` 把每条通知记到 trace 旁边（`<trace>.updates`）。
+
+`$sub_env_prefix_on_update` 决定那个子环境的名字前缀：`answer_a` 传 `"update"`，通知记在
+`root/c2/update1`…；`answer_b` 传 `"note"`，通知记在 `root/c3/note1`…。
 
 四次调用都在各自的子环境中执行（`c0`、`c1` 开两个会话，`c2`、`c3` 各执行一轮）。该子环境的数据路径即
 本次调用的**存储路径**：答案记录在该路径下，同一 store 上的后续运行直接从该路径回放，不再向 agent 发送

@@ -2,7 +2,8 @@
 
 这个示例用 `viba_acp` 的客户端接口调用一个 agent：开两个会话、各提一个问题、拿回两个响应。两个会话
 带不同的 wiki 路径，问题也让 agent 说出它这个会话拿到的 wiki 路径；服务把各自的上下文交给 agent（能收
-system prompt 的收字段，不收的补一轮提示）。两个响应用积一起返回，两轮都会执行。
+system prompt 的收字段，不收的补一轮提示）。两个响应用积一起返回，两轮都会执行。回调收到的通知记在各自
+的子环境里：第一个会话用前缀 `update`，第二个用 `note`。
 
 ## two_wikis.viba
 
@@ -58,6 +59,7 @@ answer_a =
   << $session session_a
   << $prompt (ListLiteral[question])
   << $on_update on_notification
+  << $sub_env_prefix_on_update "update"
 
 answer_b =
      viba_acp.send_prompt
@@ -65,6 +67,7 @@ answer_b =
   << $session session_b
   << $prompt (ListLiteral[question])
   << $on_update on_notification
+  << $sub_env_prefix_on_update "note"
 
 __impl__ = answer_a * answer_b
 ```
