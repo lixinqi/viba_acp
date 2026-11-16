@@ -1,6 +1,7 @@
 """Run the viba_acp demo end to end: one schedule, one service, one store.
 
-    python3 demo/viba_acp/run.py                        # the scripted agent
+    python3 demo/viba_acp/run.py                        # the Claude Agent SDK's adapter
+    python3 demo/viba_acp/run.py --agent dsh            # DeepSeek Harness's acp profile
     python3 demo/viba_acp/run.py --fresh                # start from an empty store
 
 What it starts is `distributed.scheduler` over one service:
@@ -33,21 +34,12 @@ HOST = Path(os.environ.get("VIBA_ACP_HOST", str(ROOT.parent / "demo-viba"))).res
 
 DEFAULT_STORE = HERE / ".store"
 
-# The demo document builds the scripted backend; `--agent` swaps that variant name
-# for the implementation the run names. Every backend carries the same session context.
-BACKEND_SNIPPET = """session_context =
-    $wiki_path "../demo-viba/viba/viba/wiki"
-  * $version nil
-
-backend =
-    $ScriptedAgentBackend nil
-  * $context session_context"""
-
-BACKEND_SNIPPETS = {
-    "scripted": BACKEND_SNIPPET,
-    "claude": BACKEND_SNIPPET.replace("ScriptedAgentBackend",
-                                      "ClaudeAgentBackend"),
-    "dsh": BACKEND_SNIPPET.replace("ScriptedAgentBackend", "DshAgentBackend"),
+# The demo document builds the Claude backend twice, with two wiki paths; `--agent`
+# swaps the variant name for the implementation the run names.
+CLAUDE_BACKEND = "ClaudeAgentBackend"
+BACKEND_VARIANTS = {
+    "claude": CLAUDE_BACKEND,
+    "dsh": "DshAgentBackend",
 }
 
 
@@ -56,9 +48,8 @@ def main(argv=None) -> int:
     parser.add_argument("--store", default=None,
                         help="the environment storage the rounds share "
                              "(default: demo/viba_acp/.store/<agent>)")
-    parser.add_argument("--agent", default="scripted",
-                        choices=("scripted", "claude", "dsh"),
-                        help="the ACP agent the service drives (default: scripted)")
+    parser.add_argument("--agent", default="claude", choices=("claude", "dsh"),
+                        help="the agent the demo drives (default: claude)")
     parser.add_argument("--trace", default=None,
                         help="where the ACP messages go, one JSON line per message "
                              "(default: <store>/agent-trace.jsonl)")
@@ -89,7 +80,7 @@ def main(argv=None) -> int:
 
     from distributed import scheduler
 
-    entry = build_source(store, options.agent)
+    entry = build_source(store, BACKEND_VARIANTS[options.agent])
     print(f"agent: {options.agent}\nstore: {store}\ntrace: {trace}\nsource: {entry.parent}",
           file=sys.stderr)
     return scheduler.main([
@@ -100,7 +91,7 @@ def main(argv=None) -> int:
     ])
 
 
-def build_source(store: Path, agent: str) -> Path:
+def build_source(store: Path, backend: str) -> Path:
     """Write the modules the two documents name, and answer the entry.
 
     A document's sections are documentation and code: a `viba <name>` block
@@ -109,8 +100,8 @@ def build_source(store: Path, agent: str) -> Path:
     `<source>/viba_acp/`, the demo's program under `<source>/`; the documents stay
     the source, this directory is a build product.
 
-    The demo document builds the scripted backend; `--agent` swaps that block for the
-    chosen implementation, so the same program drives the agent the run asks for.
+    The demo document builds the Claude backend (both sessions); `--agent` swaps
+    that variant name for the chosen implementation.
     """
     source = store / "source" / "viba_acp"
     source.mkdir(parents=True, exist_ok=True)
@@ -120,10 +111,9 @@ def build_source(store: Path, agent: str) -> Path:
             (ROOT / "demo" / "viba_acp.viba.md", source)):
         for name, text in read_modules(document).items():
             (directory / name).write_text(text, encoding="utf-8")
-    entry = source / "explain_then_shorten.viba"
+    entry = source / "two_wikis.viba"
     text = entry.read_text(encoding="utf-8")
-    entry.write_text(text.replace(BACKEND_SNIPPET, BACKEND_SNIPPETS[agent]),
-                     encoding="utf-8")
+    entry.write_text(text.replace(CLAUDE_BACKEND, backend), encoding="utf-8")
     return entry
 
 

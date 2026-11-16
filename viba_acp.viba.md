@@ -28,7 +28,6 @@ set_session_title = apis.set_session_title
 
 Session = types.Session
 AcpBackend = types.AcpBackend
-ScriptedAgentBackend = types.ScriptedAgentBackend
 ClaudeAgentBackend = types.ClaudeAgentBackend
 DshAgentBackend = types.DshAgentBackend
 AgentSessionContext = types.AgentSessionContext
@@ -231,7 +230,8 @@ ContextVersion = str
 ### AgentSessionContext
 
 一个会话的上下文：wiki 的路径，与可选的上下文版本。开会话、载入会话与接回会话时，服务把 `$wiki_path`
-交给会话：agent 收 system prompt 就作为它发，不收就在建会话后补一轮上下文提示。
+交给会话：agent 收 system prompt 就作为它发，不收就在建会话后补一轮上下文提示（只要它记下，不要用工具、
+不要作答）。
 
 ```viba types
 AgentSessionContext =
@@ -242,24 +242,13 @@ AgentSessionContext =
 
 ### AcpBackend
 
-一个 ACP 后端：变体按后端实现分，现在是脚本化 agent、Claude、DeepSeek Harness 三种。
+一个 ACP 后端：变体按后端实现分，现在是 Claude、DeepSeek Harness 两种。
 
 ```viba types
 AcpBackend =
     Oneof
-  | ScriptedAgentBackend
   | ClaudeAgentBackend
   | DshAgentBackend
-```
-
-### ScriptedAgentBackend
-
-仓库里的脚本化 ACP agent，不接模型。`$context` 是这一实例的会话上下文。
-
-```viba types
-ScriptedAgentBackend =
-    tagged[__type__, Object]
-  * $context AgentSessionContext
 ```
 
 ### ClaudeAgentBackend

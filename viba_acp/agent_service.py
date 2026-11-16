@@ -10,8 +10,8 @@ The conversation — one agent process, and the ACP sessions that process has li
 in this process and is closed when the process exits. `Session` is data: it names the
 backend and the session the calls use.
 
-Each `AcpBackend` variant is one agent (`scripted`, `claude`, `dsh`); `agents.py` holds
-each command and the environment it needs. One service process may drive all of them.
+Each `AcpBackend` variant is one agent (`claude`, `dsh`); `agents.py` holds each
+command and the environment it needs. One service process may drive both.
 """
 
 import atexit
@@ -33,7 +33,6 @@ WORKSPACE = HERE.parent                   # the repository root
 
 # Which agent each `AcpBackend` variant is; `agents.py` knows its command.
 _BACKEND_AGENTS = {
-    "$ScriptedAgentBackend": "scripted",
     "$ClaudeAgentBackend": "claude",
     "$DshAgentBackend": "dsh",
 }

@@ -24,13 +24,12 @@ this whole run, that the agent may go ahead.
 A session's context is delivered the way the agent can take it: as the ACP
 `systemPrompt` (append mode) when the agent advertises
 `sessionCapabilities.systemPrompt`, and as the session's first prompt when it does not;
-that fallback's answer is dropped.
+that fallback asks the agent to acknowledge only, and its answer is dropped.
 
 One `Conversation` is one agent process and the sessions it has live: `initialize`
 happens once, `new_session` opens a session, and every `prompt` is one more turn on one
 of them. `run_turn` is the one-shot form, for trying an agent by hand.
 
-    python3 viba_acp/scripted_agent.py     # the scripted agent used by the demo
 """
 
 import json
@@ -241,8 +240,15 @@ class Client:
                 "content": [{"type": "text", "text": text}]}
 
     def give_context(self, session: str, text: str) -> None:
-        """Deliver context as one prompt turn; that answer is dropped."""
-        self.prompt(session, [{"type": "text", "text": text}])
+        """Deliver context as one prompt turn; that answer is dropped.
+
+        The prompt asks the agent to take note only: this is context for the prompts
+        that follow, not a request to act now.
+        """
+        self.prompt(session, [{
+            "type": "text",
+            "text": (f"Context: {text} Acknowledge this and do not use tools or "
+                     f"answer yet.")}])
 
     def load_session(self, session: str, cwd: str, on_update=None,
                      system_prompt: str = None) -> None:

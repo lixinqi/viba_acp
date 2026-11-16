@@ -1,8 +1,7 @@
 """The agents this service can drive, by name: their commands and the env they need.
 
-`the_command(name)` picks one (`VIBA_AGENT` names the default when no name is given):
+`the_command(name)` answers one:
 
-- `scripted` — the in-repo scripted agent, no model;
 - `claude` — the Claude Agent SDK's ACP adapter, `npx -y
   @agentclientprotocol/claude-agent-acp`. It spawns the Claude CLI itself, so
   `CLAUDE_CODE_EXECUTABLE` points at the working one, else the one on `PATH`;
@@ -21,22 +20,16 @@ in the environment that started this process.
 
 import os
 import shutil
-import sys
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent            # viba_acp
 CLAUDE_ADAPTER = ("npx", "-y", "@agentclientprotocol/claude-agent-acp")
 
 
 def names():
-    return ("scripted", "claude", "dsh")
+    return ("claude", "dsh")
 
 
-def the_command(name=None):
-    """(command, extra environment) for one agent; `VIBA_AGENT` when no name."""
-    name = name or os.environ.get("VIBA_AGENT", "scripted")
-    if name == "scripted":
-        return [sys.executable, str(HERE / "scripted_agent.py")], {}
+def the_command(name):
+    """(command, extra environment) for one agent."""
     if name == "claude":
         executable = find_claude()
         env = {"CLAUDE_CODE_EXECUTABLE": executable} if executable else {}
@@ -61,8 +54,6 @@ def find_dsh():
 
 def available(name):
     """Whether this agent can start on this machine, as far as a path can tell."""
-    if name == "scripted":
-        return True
     if name == "claude":
         return shutil.which("npx") is not None and find_claude() is not None
     if name == "dsh":
