@@ -11,7 +11,7 @@ __decl__ = viba_acp.PromptResponse <- $env Env
 
 args = __get_args__ << __decl__
 
-session = viba_acp.open_session << $env ($sub_env << args.env << "c0")
+session = viba_acp.new_session << $env ($sub_env << args.env << "c0")
 
 question =
     $TextContent Object

@@ -8,7 +8,8 @@ JSON，和 `--trace` 里一行一条的 ACP 消息。预期：
 3) 会话编号记在 `root/c0`，这一轮的响应记在 `root/c1`；
 4) 同一个 store 再跑一次，一个 prompt 都不发：每一步都在 store 里回放了；
 5) 客户端自己的几条边角：工具调用与权限、提问超时会发 `session/cancel` 并拿到 `cancelled`；
-   agent 报一个 ACP 没有的 stopReason，客户端拒绝它；agent 起不来，客户端报错而不是挂住。
+   agent 报一个 ACP 没有的 stopReason，客户端拒绝它；agent 起不来，客户端报错而不是挂住；
+6) 分叉：`session/fork` 给出新的会话编号，新会话与源会话都能继续 prompt。
 
     python3 demo/viba_acp/test_agent.py
 """
@@ -91,6 +92,7 @@ def run(tmp: Path):
     _the_same_store_asks_nothing(tmp)
     _the_permission_path()
     _the_update_callback()
+    _the_fork_path()
     _the_client_edges()
 
 
@@ -221,6 +223,29 @@ def _the_update_callback():
         kinds = [notice["update"].get("sessionUpdate") for notice in seen]
         check(kinds and all(kind == "agent_message_chunk" for kind in kinds),
               f"the callback sees the chunks: {kinds!r}")
+
+
+def _the_fork_path():
+    """`session/fork`: one new session off the source; both keep answering."""
+    with tempfile.TemporaryDirectory(prefix="viba-acp-fork-") as scratch:
+        trace = Path(scratch) / "fork.jsonl"
+        with acp_client.Conversation(SCRIPTED_AGENT, str(ROOT),
+                                     trace=trace) as conversation:
+            source = conversation.session
+            forked = conversation.fork_session(source, str(ROOT))
+            check(forked != source, f"the fork has its own id: {forked!r}")
+            text, stop = conversation.client.prompt(
+                forked, [{"type": "text", "text": "hello"}])
+            check(stop == "end_turn" and text.startswith("scripted-agent:"),
+                  f"the forked session answers: {stop!r} {text!r}")
+            text, stop = conversation.prompt("hello")
+            check(stop == "end_turn" and text.startswith("scripted-agent:"),
+                  f"the source session still answers: {stop!r} {text!r}")
+        forks = requests(trace, "session/fork")
+        check(len(forks) == 1, f"the agent is asked to fork once: {len(forks)}")
+        params = (forks[0].get("params") or {}) if forks else {}
+        check(params.get("sessionId") == source and params.get("cwd") == str(ROOT),
+              f"the request names the source session and the cwd: {params!r}")
 
 
 def _the_client_edges():

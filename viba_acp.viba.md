@@ -14,10 +14,11 @@ import viba_acp.apis as apis
 import viba_acp.types as types
 
 
-open_session = apis.open_session
+new_session = apis.new_session
 send_prompt = apis.send_prompt
 resume_session = apis.resume_session
 load_session = apis.load_session
+fork_session = apis.fork_session
 cancel_session = apis.cancel_session
 close_session = apis.close_session
 delete_session = apis.delete_session
@@ -48,8 +49,8 @@ AgentThoughtChunk = types.AgentThoughtChunk
 
 ## 基本操作
 
-客户端→agent 的操作有十个：开会话、提交一轮、接回会话（load/resume）、取消、关闭、删除、归档与
-取消归档、设置标题。它们由服务实现，参数按 ACP 的请求展开，结果按 ACP 的响应给出。
+客户端→agent 的操作有十一个：开会话、提交一轮、接回会话（load/resume）、分叉会话、取消、关闭、删除、
+归档与取消归档、设置标题。它们由服务实现，参数按 ACP 的请求展开，结果按 ACP 的响应给出。
 
 agent→客户端的通知通过 `$on_update` 这个函数型参数交给调用方；当前建模三种消息块。
 
@@ -61,12 +62,12 @@ agent→客户端的通知通过 `$on_update` 这个函数型参数交给调用�
 import viba_acp.types as types
 ```
 
-### open_session
+### new_session
 
 `session/new`：开一个会话。工作目录与 MCP 服务器属于客户端的策略，由服务决定。
 
 ```viba apis
-open_session =
+new_session =
      types.SessionId
   <- $env Env
   <- { open a new ACP session and answer its id }
@@ -111,6 +112,20 @@ load_session =
   <- $cwd str
   <- $on_update (void <- $env Env <- $notification types.SessionNotification)
   <- { load the session named by $session_id, calling $on_update for each replayed session/update; the response's optional fields are not modeled, so this answers void }
+```
+
+### fork_session
+
+`session/fork`：把一个已有会话分叉成新会话，新会话带着源会话的历史，源会话不变；请求的选项与
+`session/load` 相同。
+
+```viba apis
+fork_session =
+     types.SessionId
+  <- $env Env
+  <- $session_id types.SessionId
+  <- $cwd str
+  <- { fork the session named by $session_id and answer the new session's id }
 ```
 
 ### cancel_session

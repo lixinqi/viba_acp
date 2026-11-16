@@ -1,6 +1,6 @@
-"""The service side of the `viba_acp` interface: two ACP operations over one session.
+"""The service side of the `viba_acp` interface: the ACP operations over one session.
 
-`open_session` opens the conversation this process will use and answers its session id;
+`new_session` opens the conversation this process will use and answers its session id;
 `send_prompt` runs one prompt turn on it and answers the `PromptResponse`. Both go through
 `service.recorded`, so every call is recorded under its storage path and a later run on
 the same store replays it instead of prompting the agent again.
@@ -39,9 +39,9 @@ _CONVERSATIONS = {}
 
 
 def the_api(service):
-    """The interface's table: the two ACP operations the module declares."""
+    """The interface's table: one function per operation the module declares."""
 
-    def open_session(environ):
+    def new_session(environ):
         return service.recorded(environ, lambda: the_conversation().session)
 
     def send_prompt(environ, session, prompt_blocks, on_update):
@@ -80,6 +80,13 @@ def the_api(service):
 
         return service.recorded(environ, load)
 
+    def fork_session(environ, session_id, cwd):
+        def fork():
+            return the_conversation().fork_session(leaf_value(session_id),
+                                                   leaf_value(cwd))
+
+        return service.recorded(environ, fork)
+
     def on_notification(environ, notification):
         service.recorded(environ, lambda: notification)
         return viba_data(viba_ast.Nil())
@@ -109,8 +116,9 @@ def the_api(service):
                                              leaf_value(title))
         return viba_data(viba_ast.Nil())
 
-    return {"open_session": open_session, "send_prompt": send_prompt,
+    return {"new_session": new_session, "send_prompt": send_prompt,
             "resume_session": resume_session, "load_session": load_session,
+            "fork_session": fork_session,
             "cancel_session": cancel_session, "close_session": close_session,
             "delete_session": delete_session, "archive_session": archive_session,
             "unarchive_session": unarchive_session,

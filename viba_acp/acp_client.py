@@ -214,6 +214,15 @@ class Client:
         finally:
             self._on_update = None
 
+    def fork_session(self, session: str, cwd: str) -> str:
+        """`session/fork`: a new session that carries this one's history."""
+        result = self.request("session/fork", {"sessionId": session, "cwd": cwd,
+                                               "mcpServers": []})
+        forked = result.get("sessionId")
+        if not isinstance(forked, str) or not forked:
+            raise AcpError("session/fork reported no sessionId")
+        return forked
+
     def cancel_session(self, session: str) -> None:
         """`session/cancel`: a notification, not a request."""
         self.notify("session/cancel", {"sessionId": session})
@@ -445,6 +454,10 @@ class Conversation:
     def load_session(self, session: str, cwd: str, on_update=None) -> None:
         """`session/load`: reconnect to a session, replaying its history."""
         self.client.load_session(session, cwd, on_update)
+
+    def fork_session(self, session: str, cwd: str) -> str:
+        """`session/fork`: a new session that carries this one's history."""
+        return self.client.fork_session(session, cwd)
 
     def cancel_session(self, session: str) -> None:
         self.client.cancel_session(session)

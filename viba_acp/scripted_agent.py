@@ -68,6 +68,8 @@ class Agent:
             self._initialize(message)
         elif method == "session/new":
             self._new_session(message)
+        elif method == "session/fork":
+            self._fork_session(message)
         elif method == "session/prompt":
             self._prompt(message)
         elif method == "session/cancel":
@@ -85,6 +87,10 @@ class Agent:
         })
 
     def _new_session(self, message) -> None:
+        self.sessions += 1
+        respond(message["id"], {"sessionId": f"sess-{self.sessions}"})
+
+    def _fork_session(self, message) -> None:
         self.sessions += 1
         respond(message["id"], {"sessionId": f"sess-{self.sessions}"})
 

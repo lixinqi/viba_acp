@@ -4,7 +4,7 @@
 
 一次调用涉及三方：
 
-- **viba 程序**调用 `viba_acp.open_session` 与 `viba_acp.send_prompt`；agent 的名字、启动命令与通信协议不在程序内。
+- **viba 程序**调用 `viba_acp.new_session` 与 `viba_acp.send_prompt`；agent 的名字、启动命令与通信协议不在程序内。
 - **服务**实现这两个操作（[`agent_service.py`](agent_service.py)），并在进程生命周期内维持一个 agent
   进程与一条 ACP 会话。
 - **agent** 是外部进程，由 [`agents.py`](agents.py) 给出的命令启动，通过 ACP 通信；`VIBA_AGENT`
@@ -17,7 +17,7 @@ ACP 是客户端与 agent 之间的会话协议。服务启动 agent 进程，`i
 会话属于服务，不属于 viba 数据：`SessionId` 是走数据的那份编号，会话本身保存在宿主的 `Conversation` 中
 （[`acp_client.py`](acp_client.py)），随服务进程结束而关闭。示例开一个会话、执行一轮。
 
-接口的类型名取自 ACP 的 schema，操作名对应 ACP 的方法：`open_session` 是 `session/new`，`send_prompt` 是
+接口的类型名取自 ACP 的 schema，操作名对应 ACP 的方法：`new_session` 是 `session/new`，`send_prompt` 是
 `session/prompt`。
 
 ## 2. 接口
@@ -27,9 +27,9 @@ ACP 是客户端与 agent 之间的会话协议。服务启动 agent 进程，`i
 
 三条约定：
 
-1. **每个操作先收环境。** `$env Env` 是第一个参数，与 viba 的其他调用一致；`open_session` 的其余参数由
+1. **每个操作先收环境。** `$env Env` 是第一个参数，与 viba 的其他调用一致；`new_session` 的其余参数由
    服务决定（工作目录、MCP 服务器），viba 一侧不传。
-2. **会话编号是数据。** `open_session` 的答案是 `SessionId`；`send_prompt` 收 `$session SessionId` 与一组
+2. **会话编号是数据。** `new_session` 的答案是 `SessionId`；`send_prompt` 收 `$session SessionId` 与一组
    `ContentBlock`，在编号所指的会话上执行。
 3. **返回值是 `PromptResponse`。** 结束原因在 `$stop_reason`，token 用量在 `$usage`；消息文本不在
    返回值里，由 `$on_update` 逐条收到（第 3.3 节）。
@@ -68,7 +68,7 @@ __decl__ = viba_acp.PromptResponse <- $env Env
 
 args = __get_args__ << __decl__
 
-session = viba_acp.open_session << $env ($sub_env << args.env << "c0")
+session = viba_acp.new_session << $env ($sub_env << args.env << "c0")
 
 question =
     $TextContent Object
@@ -163,7 +163,7 @@ store 中每一步对应一份快照：
 
 ```text
 <store>/source/viba_acp/          # 示例程序；模块在 viba_acp/ 下（每次运行重新生成）
-<store>/root/c0/value.viba       # open_session 的 SessionId
+<store>/root/c0/value.viba       # new_session 的 SessionId
 <store>/root/c1/value.viba       # prompt 的 PromptResponse
 <store>/failure/round-1.viba     # 本轮的失败状态（无递延时为空记录）
 ```
