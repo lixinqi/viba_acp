@@ -33,6 +33,13 @@ HOST = Path(os.environ.get("VIBA_ACP_HOST", str(ROOT.parent / "demo-viba"))).res
 
 DEFAULT_STORE = HERE / ".store"
 
+# The `AcpBackend` variant each `--agent` builds the demo with.
+BACKEND_VARIANTS = {
+    "scripted": "ScriptedAgentBackend",
+    "claude": "ClaudeAgentBackend",
+    "dsh": "DshAgentBackend",
+}
+
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="run the viba_acp demo")
@@ -67,13 +74,12 @@ def main(argv=None) -> int:
     os.environ["PYTHONPATH"] = os.pathsep.join(
         here_and_the_library
         + ([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else []))
-    os.environ["VIBA_AGENT"] = options.agent
     os.environ["VIBA_AGENT_TRACE"] = str(trace)
     sys.path[:0] = here_and_the_library
 
     from distributed import scheduler
 
-    entry = build_source(store)
+    entry = build_source(store, options.agent)
     print(f"agent: {options.agent}\nstore: {store}\ntrace: {trace}\nsource: {entry.parent}",
           file=sys.stderr)
     return scheduler.main([
@@ -84,7 +90,7 @@ def main(argv=None) -> int:
     ])
 
 
-def build_source(store: Path) -> Path:
+def build_source(store: Path, agent: str) -> Path:
     """Write the modules the two documents name, and answer the entry.
 
     A document's sections are documentation and code: a `viba <name>` block
@@ -92,6 +98,10 @@ def build_source(store: Path) -> Path:
     that file's comments. The interface document's modules go under
     `<source>/viba_acp/`, the demo's program under `<source>/`; the documents stay
     the source, this directory is a build product.
+
+    The demo document constructs the `ScriptedAgentBackend`; `--agent` swaps that
+    variant name for the chosen implementation, so the same program drives the agent
+    the run asks for.
     """
     source = store / "source" / "viba_acp"
     source.mkdir(parents=True, exist_ok=True)
@@ -101,7 +111,11 @@ def build_source(store: Path) -> Path:
             (ROOT / "demo" / "viba_acp.viba.md", source)):
         for name, text in read_modules(document).items():
             (directory / name).write_text(text, encoding="utf-8")
-    return source / "explain_then_shorten.viba"
+    entry = source / "explain_then_shorten.viba"
+    text = entry.read_text(encoding="utf-8")
+    entry.write_text(text.replace("ScriptedAgentBackend",
+                                  BACKEND_VARIANTS[agent]), encoding="utf-8")
+    return entry
 
 
 def read_modules(document: Path) -> dict:

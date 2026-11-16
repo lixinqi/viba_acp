@@ -1,6 +1,6 @@
-"""The ACP agents this service can drive: their commands and the env they need.
+"""The agents this service can drive, by name: their commands and the env they need.
 
-`VIBA_AGENT` picks one (or `the_command(name)` does):
+`the_command(name)` picks one (`VIBA_AGENT` names the default when no name is given):
 
 - `scripted` — the in-repo scripted agent, no model;
 - `claude` — the Claude Agent SDK's ACP adapter, `npx -y

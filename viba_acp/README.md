@@ -4,11 +4,11 @@
 
 一次调用涉及三方：
 
-- **viba 程序**调用 `viba_acp.new_session` 与 `viba_acp.send_prompt`；agent 的名字、启动命令与通信协议不在程序内。
-- **服务**实现这两个操作（[`agent_service.py`](agent_service.py)），并在进程生命周期内维持一个 agent
-  进程与一条 ACP 会话。
-- **agent** 是外部进程，由 [`agents.py`](agents.py) 给出的命令启动，通过 ACP 通信；`VIBA_AGENT`
-  选哪一个。
+- **viba 程序**调用 `viba_acp.new_session` 与 `viba_acp.send_prompt`；agent 的启动命令与通信协议不在程序内，
+  程序只用 `AcpBackend` 的变体指明要哪一种后端。
+- **服务**实现这些操作（[`agent_service.py`](agent_service.py)），为每个用到的后端维持一个 agent 进程与
+  它的 ACP 会话。
+- **agent** 是外部进程，由 [`agents.py`](agents.py) 给出的命令启动，通过 ACP 通信。
 
 ACP 是客户端与 agent 之间的会话协议。服务启动 agent 进程，`initialize` 协商版本与能力；`session/new`
 建立一个会话，此后每次 `session/prompt` 是该会话上的一轮。轮内 agent 通过 `session/update` 流式报告，
@@ -28,8 +28,8 @@ ACP 是客户端与 agent 之间的会话协议。服务启动 agent 进程，`i
 
 三条约定：
 
-1. **每个操作先收环境。** `$env Env` 是第一个参数，与 viba 的其他调用一致；`new_session` 的其余参数由
-   服务决定（工作目录、MCP 服务器），viba 一侧不传。
+1. **每个操作先收环境。** `$env Env` 是第一个参数，与 viba 的其他调用一致；开会话与接回还要给
+   `AcpBackend`，其余参数由服务决定（工作目录、MCP 服务器），viba 一侧不传。
 2. **会话是数据。** `new_session` 的答案是 `Session`（后端 + 编号）；`send_prompt` 收 `$session Session`
    与一组 `ContentBlock`，在它所指的会话上执行。
 3. **返回值是 `PromptResponse`。** 结束原因在 `$stop_reason`，token 用量在 `$usage`；消息文本不在
@@ -50,7 +50,9 @@ store 默认按 agent 分开（`demo/viba_acp/.store/<agent>`），同一份程�
 
 `run.py` 把两份 `.viba.md` 文档按 `viba <name>` 代码块拼成模块：接口文档的 `viba public`/`viba types`/
 `viba apis` 落到 `<store>/source/viba_acp/viba_acp/` 下的三个文件，块外的说明成为该文件的注释；示例程序
-按标题落到 `<store>/source/viba_acp/explain_then_shorten.viba`。然后
+按标题落到 `<store>/source/viba_acp/explain_then_shorten.viba`。示例程序里 `backend` 写的是
+`ScriptedAgentBackend`；`--agent claude`/`dsh` 在建模块时把这个变体名换成 `ClaudeAgentBackend`/
+`DshAgentBackend`，所以同一份程序能跑三种 agent。然后
 启动 [`distributed/scheduler.py`](../../demo-viba/distributed/scheduler.py) 与一个服务进程（`agent_service`）。它产出
 两项结果：
 
@@ -69,7 +71,11 @@ __decl__ = viba_acp.PromptResponse <- $env Env
 
 args = __get_args__ << __decl__
 
-session = viba_acp.new_session << $env ($sub_env << args.env << "c0")
+backend =
+    $ScriptedAgentBackend nil
+  * $context nil
+
+session = viba_acp.new_session << $env ($sub_env << args.env << "c0") << $backend backend
 
 question =
     $TextContent Object
@@ -97,8 +103,8 @@ __impl__ =
 
 ### 3.3 ACP 会话
 
-一个服务进程与 agent 之间只有一条连接、一个会话。时序如下（`--trace` 逐条记录；`× n` 表示若干同型的
-`session/update`）：
+一个服务进程与一个 agent 之间只有一条连接、一个会话（示例只用一个 agent）。时序如下（`--trace` 逐条记录；
+`× n` 表示若干同型的 `session/update`）：
 
 ```text
 client → initialize
@@ -188,8 +194,9 @@ store 中每一步对应一份快照：
 
 ## 6. 接入真实 agent
 
-三个 agent 都已接好，命令与环境在 [`agents.py`](agents.py)，用 `--agent` 选。代码里没有本机路径：
-命令从 `PATH` 或环境变量解析，凭据取自启动 `run.py` 的那个环境。
+三个 agent 都已接好，命令与环境在 [`agents.py`](agents.py)，用 `--agent` 选（第 3.1 节：它决定建模块时把
+示例程序的 `AcpBackend` 变体换成哪一个）。代码里没有本机路径：命令从 `PATH` 或环境变量解析，凭据取自
+启动 `run.py` 的那个环境。
 
 | `--agent` | 命令 | 凭据 |
 |---|---|---|
@@ -228,7 +235,7 @@ python3 viba_acp/acp_client.py --agent "dsh acp" "hello"
 | 文件 | 说明 |
 |---|---|
 | [`viba_acp.viba.md`](../viba_acp.viba.md) | 三个模块：`public.viba`、`types.viba`、`apis.viba` |
-| [`agent_service.py`](agent_service.py) | 服务那一侧：会话与操作，启动 `VIBA_AGENT` 选中的 agent |
+| [`agent_service.py`](agent_service.py) | 服务那一侧：会话与操作，按 `AcpBackend` 变体启动对应 agent |
 | [`agents.py`](agents.py) | 三个 agent 的命令、环境与可用性判断 |
 | [`acp_client.py`](acp_client.py) | ACP 客户端：stdio 分帧、会话、prompt、权限、取消 |
 | [`scripted_agent.py`](scripted_agent.py) | 脚本化的 ACP agent：不含模型，响应可以预期 |

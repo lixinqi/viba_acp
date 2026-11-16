@@ -57,7 +57,8 @@ AgentThoughtChunk = types.AgentThoughtChunk
 
 客户端→agent 的操作有十一个：开会话、提交一轮、接回会话（load/resume）、分叉会话、取消、关闭、删除、
 归档与取消归档、设置标题。它们由服务实现，参数按 ACP 的请求展开，结果按 ACP 的响应给出。会话上的操作
-收 `Session`（ACP 后端 + 该后端的会话编号）；开会话、接回与分叉回答这样的会话句柄。
+收 `Session`（ACP 后端 + 该后端的会话编号）；开会话与接回还要指明在哪个 ACP 后端上（`AcpBackend`），
+分叉从会话里取后端，三者都回答会话句柄。
 
 agent→客户端的通知通过 `$on_update` 这个函数型参数交给调用方；当前建模三种消息块。
 
@@ -71,13 +72,14 @@ import viba_acp.types as types
 
 ### new_session
 
-`session/new`：开一个会话。工作目录与 MCP 服务器属于客户端的策略，由服务决定。
+`session/new`：在给定的 ACP 后端上开一个会话。工作目录与 MCP 服务器属于客户端的策略，由服务决定。
 
 ```viba apis
 new_session =
      types.Session
   <- $env Env
-  <- { open a new ACP session and answer its handle }
+  <- $backend types.AcpBackend
+  <- { open a new ACP session on that backend and answer its handle }
 ```
 
 ### send_prompt
@@ -96,29 +98,31 @@ send_prompt =
 
 ### resume_session
 
-`session/resume`：接上一个已有会话，不重放历史。答案是这个会话的句柄。
+`session/resume`：在给定的后端上接上一个已有会话，不重放历史。答案是这个会话的句柄。
 
 ```viba apis
 resume_session =
      types.Session
   <- $env Env
+  <- $backend types.AcpBackend
   <- $session_id types.SessionId
   <- $cwd str
-  <- { resume the session named by $session_id and answer its handle }
+  <- { resume the session named by $session_id on that backend and answer its handle }
 ```
 
 ### load_session
 
-`session/load`：载入一个已有会话，重放它的历史。`$on_update` 接收重放出来的每条通知；答案是这个会话的句柄。
+`session/load`：在给定的后端上载入一个已有会话，重放它的历史。`$on_update` 接收重放出来的每条通知；答案是这个会话的句柄。
 
 ```viba apis
 load_session =
      types.Session
   <- $env Env
+  <- $backend types.AcpBackend
   <- $session_id types.SessionId
   <- $cwd str
   <- $on_update (void <- $env Env <- $notification types.SessionNotification)
-  <- { load the session named by $session_id, calling $on_update for each replayed session/update, and answer its handle }
+  <- { load the session named by $session_id on that backend, calling $on_update for each replayed session/update, and answer its handle }
 ```
 
 ### fork_session

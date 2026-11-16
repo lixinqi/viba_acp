@@ -11,7 +11,11 @@ __decl__ = viba_acp.PromptResponse <- $env Env
 
 args = __get_args__ << __decl__
 
-session = viba_acp.new_session << $env ($sub_env << args.env << "c0")
+backend =
+    $ScriptedAgentBackend nil
+  * $context nil
+
+session = viba_acp.new_session << $env ($sub_env << args.env << "c0") << $backend backend
 
 question =
     $TextContent Object

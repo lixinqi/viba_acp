@@ -1,7 +1,7 @@
 """The service side of the `viba_acp` interface: the ACP backend's operations.
 
-`new_session` opens the conversation this process will use and answers its `Session`
-(an `AcpBackend` value and the session id); `send_prompt` runs one prompt turn on it
+`new_session` opens a session on the `AcpBackend` the call names and answers its
+`Session` (that backend and the session id); `send_prompt` runs one prompt turn on it
 and answers the `PromptResponse`. Both go through `service.recorded`, so every call is
 recorded under its storage path and a later run on the same store replays it instead of
 prompting the agent again.
@@ -10,9 +10,8 @@ The conversation — one agent process, and the ACP sessions that process has li
 in this process and is closed when the process exits. `Session` is data: it names the
 backend and the session the calls use.
 
-`VIBA_AGENT` picks the agent (`scripted`, `claude`, `dsh`); `agents.py` holds each
-command and the environment it needs. The interface, the program and the entry do
-not change.
+Each `AcpBackend` variant is one agent (`scripted`, `claude`, `dsh`); `agents.py` holds
+each command and the environment it needs. One service process may drive all of them.
 """
 
 import atexit
@@ -32,68 +31,72 @@ from viba.interpret import _HostArgument, sub_env
 HERE = Path(__file__).resolve().parent    # viba_acp
 WORKSPACE = HERE.parent                   # the repository root
 
-# What this service drives. `VIBA_AGENT` picks it (`scripted`, `claude`, `dsh`);
-# `agents.py` knows each command and the environment it needs.
-AGENT, AGENT_ENV = the_command()
-
-# The `AcpBackend` variant each agent is.
-_BACKEND_TAGS = {
-    "scripted": "$ScriptedAgentBackend",
-    "claude": "$ClaudeAgentBackend",
-    "dsh": "$DshAgentBackend",
+# Which agent each `AcpBackend` variant is; `agents.py` knows its command.
+_BACKEND_AGENTS = {
+    "$ScriptedAgentBackend": "scripted",
+    "$ClaudeAgentBackend": "claude",
+    "$DshAgentBackend": "dsh",
 }
 
-# One conversation per agent command, for the life of this service process.
+# One conversation per agent, for the life of this service process.
 _CONVERSATIONS = {}
 
 
 def the_api(service):
     """The interface's table: one function per operation the module declares."""
 
-    def new_session(environ):
+    def new_session(environ, backend):
+        agent = the_backend_agent(backend)
         return service.recorded(
-            environ, lambda: the_session_value(the_conversation().session))
+            environ,
+            lambda: the_session_value(backend.data,
+                                      the_conversation(agent).session))
 
     def send_prompt(environ, session, prompt_blocks, on_update):
-        session = the_session_id(session)
+        agent, session_id = the_session(session)
         blocks = [the_block(block) for block in prompt_blocks]
         handler = the_handler(on_update, environ)
 
         def turn():
-            conversation = the_conversation()
-            conversation.find_session(session)
-            return the_response(conversation, session, blocks, handler)
+            conversation = the_conversation(agent)
+            conversation.find_session(session_id)
+            return the_response(conversation, session_id, blocks, handler)
 
         return service.recorded(environ, turn)
 
-    def resume_session(environ, session_id, cwd):
+    def resume_session(environ, backend, session_id, cwd):
+        agent = the_backend_agent(backend)
         session_id = leaf_value(session_id)
         cwd = leaf_value(cwd)
 
         def resume():
-            the_conversation().resume_session(session_id, cwd)
-            return the_session_value(session_id)
+            the_conversation(agent).resume_session(session_id, cwd)
+            return the_session_value(backend.data, session_id)
 
         return service.recorded(environ, resume)
 
-    def load_session(environ, session_id, cwd, on_update):
+    def load_session(environ, backend, session_id, cwd, on_update):
+        agent = the_backend_agent(backend)
         session_id = leaf_value(session_id)
         cwd = leaf_value(cwd)
         handler = the_handler(on_update, environ)
 
         def load():
-            the_conversation().load_session(session_id, cwd, handler)
-            return the_session_value(session_id)
+            the_conversation(agent).load_session(session_id, cwd, handler)
+            return the_session_value(backend.data, session_id)
 
         return service.recorded(environ, load)
 
     def fork_session(environ, session, cwd):
-        session = the_session_id(session)
+        agent, parent = the_session(session)
+        backend = session.by_tag("$backend").data
         cwd = leaf_value(cwd)
 
         def fork():
-            forked = the_conversation().fork_session(session, cwd)
-            return the_session_value(forked)
+            conversation = the_conversation(agent)
+            conversation.find_session(parent)
+            forked = conversation.fork_session(parent, cwd)
+            return the_session_value(backend, forked)
 
         return service.recorded(environ, fork)
 
@@ -102,28 +105,33 @@ def the_api(service):
         return viba_data(viba_ast.Nil())
 
     def cancel_session(environ, session):
-        the_conversation().cancel_session(the_session_id(session))
+        agent, session_id = the_session(session)
+        the_conversation(agent).cancel_session(session_id)
         return viba_data(viba_ast.Nil())
 
     def close_session(environ, session):
-        the_conversation().close_session(the_session_id(session))
+        agent, session_id = the_session(session)
+        the_conversation(agent).close_session(session_id)
         return viba_data(viba_ast.Nil())
 
     def delete_session(environ, session):
-        the_conversation().delete_session(the_session_id(session))
+        agent, session_id = the_session(session)
+        the_conversation(agent).delete_session(session_id)
         return viba_data(viba_ast.Nil())
 
     def archive_session(environ, session):
-        the_conversation().archive_session(the_session_id(session))
+        agent, session_id = the_session(session)
+        the_conversation(agent).archive_session(session_id)
         return viba_data(viba_ast.Nil())
 
     def unarchive_session(environ, session):
-        the_conversation().unarchive_session(the_session_id(session))
+        agent, session_id = the_session(session)
+        the_conversation(agent).unarchive_session(session_id)
         return viba_data(viba_ast.Nil())
 
     def set_session_title(environ, session, title):
-        the_conversation().set_session_title(the_session_id(session),
-                                             leaf_value(title))
+        agent, session_id = the_session(session)
+        the_conversation(agent).set_session_title(session_id, leaf_value(title))
         return viba_data(viba_ast.Nil())
 
     return {"new_session": new_session, "send_prompt": send_prompt,
@@ -136,16 +144,16 @@ def the_api(service):
             "on_notification": on_notification}
 
 
-def the_conversation():
-    """The conversation this process has with that agent, made on first use."""
-    key = tuple(AGENT)
-    conversation = _CONVERSATIONS.get(key)
+def the_conversation(agent):
+    """The conversation this process has with one agent, made on first use."""
+    conversation = _CONVERSATIONS.get(agent)
     if conversation is None:
+        command, agent_env = the_command(agent)
         conversation = acp_client.Conversation(
-            AGENT, WORKSPACE,
+            command, WORKSPACE,
             permissions=os.environ.get("VIBA_AGENT_PERMISSION", "reject"),
-            trace=the_trace(), env=AGENT_ENV)
-        _CONVERSATIONS[key] = conversation
+            trace=the_trace(), env=agent_env)
+        _CONVERSATIONS[agent] = conversation
         atexit.register(conversation.close)
     return conversation
 
@@ -307,7 +315,10 @@ def the_response(conversation, session, blocks, on_update=None):
     except acp_client.AcpError:
         # The conversation cannot be trusted after a protocol error; drop it so a
         # later call starts a new one.
-        _CONVERSATIONS.pop(tuple(AGENT), None)
+        for agent, known in list(_CONVERSATIONS.items()):
+            if known is conversation:
+                del _CONVERSATIONS[agent]
+                break
         conversation.close()
         raise
     return viba_data(viba_ast.ProductChain([
@@ -316,45 +327,28 @@ def the_response(conversation, session, blocks, on_update=None):
     ]))
 
 
-def the_backend():
-    """The backend this service process is one instance of."""
-    return viba_ast.ProductChain([
-        viba_ast.Tagged(the_backend_tag(), viba_ast.Nil()),
-        viba_ast.Tagged("$context", viba_ast.Nil()),
-    ])
+def the_backend_agent(backend):
+    """The agent one `AcpBackend` argument names."""
+    for tag, agent in _BACKEND_AGENTS.items():
+        if the_has(backend, tag):
+            return agent
+    raise RuntimeError(
+        f"unknown ACP backend; this service drives "
+        f"{', '.join(sorted(_BACKEND_AGENTS))}")
 
 
-def the_backend_tag():
-    """The variant tag naming the agent this service drives."""
-    name = the_agent_name()
-    try:
-        return _BACKEND_TAGS[name]
-    except KeyError:
-        raise RuntimeError(
-            f"unknown agent {name!r}; choose one of "
-            f"{', '.join(sorted(_BACKEND_TAGS))}") from None
-
-
-def the_agent_name():
-    """Which ACP agent this service drives."""
-    return os.environ.get("VIBA_AGENT", "scripted")
-
-
-def the_session_value(session):
+def the_session_value(backend, session):
     """One session, as the interface's `Session`: its backend and its id."""
     return viba_data(viba_ast.ProductChain([
-        viba_ast.Tagged("$backend", the_backend()),
+        viba_ast.Tagged("$backend", backend),
         viba_ast.Tagged("$session_id", viba_ast.Constant(session)),
     ]))
 
 
-def the_session_id(session):
-    """The backend's session id inside one `Session` argument."""
-    backend = session.by_tag("$backend")
-    tag = the_backend_tag()
-    if not the_has(backend, tag):
-        raise RuntimeError(f"this service drives {tag} only")
-    return leaf_value(session.by_tag("$session_id"))
+def the_session(session):
+    """The agent and the session id inside one `Session` argument."""
+    return (the_backend_agent(session.by_tag("$backend")),
+            leaf_value(session.by_tag("$session_id")))
 
 
 def the_trace():
