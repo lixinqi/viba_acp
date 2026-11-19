@@ -2,7 +2,7 @@
 
     python3 demo/viba_acp/test_agents.py
 
-It runs `run.py --agent <name>` for `claude` and `dsh`. The program opens two
+It runs `run.py --agent <name>` for `claude`, `dsh` and `trae`. The program opens two
 sessions with different wikis and asks each session for the wiki path it was given;
 each session's context reaches the agent either as the `session/new` `systemPrompt`
 field or, when the agent advertises no such capability, as that session's first
@@ -17,9 +17,9 @@ prompt. For each agent the checks are:
   `root/c3`) with `end_turn`, and the program returns both responses;
 - a second run on the same store sends no prompt: everything is replayed.
 
-`claude` and `dsh` are skipped when their commands are not on this machine;
-`claude` takes `ANTHROPIC_*` from this process's environment, `dsh` its
-credentials from `~/.dsh`.
+An agent is skipped when its command is not on this machine: `claude` takes
+`ANTHROPIC_*` from this process's environment, `dsh` its credentials from `~/.dsh`,
+`trae` the login in `~/.trae`.
 """
 
 import json
@@ -51,7 +51,8 @@ checks = Checks("viba_acp/agents")
 
 WIKI_A = "../demo-viba/viba/viba/wiki"
 WIKI_B = "../demo-viba/viba/viba/core"
-BACKENDS = {"claude": "$ClaudeAgentBackend", "dsh": "$DshAgentBackend"}
+BACKENDS = {"claude": "$ClaudeAgentBackend", "dsh": "$DshAgentBackend",
+            "trae": "$TraeAgentBackend"}
 
 
 def run(agent: str, scratch: Path, fresh: bool = True):

@@ -20,7 +20,7 @@ ACP 是客户端与 agent 之间的会话协议。服务启动 agent 进程，`i
 wiki 路径）、各执行一轮。
 
 后端的会话上下文（`AgentSessionContext`）里的 `wiki_path` 在开会话、载入会话与接回会话时交给 agent：
-agent 声明了 `sessionCapabilities.systemPrompt` 就作为 system prompt 发；没声明（dsh 当前如此）就先发一轮
+agent 声明了 `sessionCapabilities.systemPrompt` 就作为 system prompt 发；没声明（dsh 与 trae 当前如此）就先发一轮
 上下文提示——提示里只要它记下，不要用工具、不要作答——答案丢弃。
 
 接口的类型名取自 ACP 的 schema，操作名对应 ACP 的方法：`new_session` 是 `session/new`，`send_prompt` 是
@@ -48,6 +48,7 @@ agent 声明了 `sessionCapabilities.systemPrompt` 就作为 system prompt 发�
 ```bash
 python3 demo/viba_acp/run.py                  # Claude Agent SDK 的 ACP 适配器
 python3 demo/viba_acp/run.py --agent dsh      # DeepSeek Harness 的 acp profile
+python3 demo/viba_acp/run.py --agent trae     # TraeCode CLI 的 ACP 服务器
 python3 demo/viba_acp/run.py --fresh          # 从空 store 开始
 ```
 
@@ -61,7 +62,7 @@ store 默认按 agent 分开（`demo/viba_acp/.store/<agent>`），同一份程�
 `viba apis` 落到 `<store>/source/viba_acp/viba_acp/` 下的三个文件，块外的说明成为该文件的注释；示例程序
 按标题落到 `<store>/source/viba_acp/two_wikis.viba`。示例程序构造两个 `ClaudeAgentBackend`，
 各带自己的会话上下文（`$wiki_path`）；`--agent` 在建模块时把两处变体名换成对应实现，agent 收不收
-system prompt 由客户端处理（见第 1 节），所以同一份程序能跑两种 agent。然后
+system prompt 由客户端处理（见第 1 节），所以同一份程序能跑三种 agent。然后
 启动 [`distributed/scheduler.py`](../../demo-viba/distributed/scheduler.py) 与一个服务进程（`agent_service`）。它产出
 两项结果：
 
@@ -247,7 +248,7 @@ store 中每一步对应一份快照：
 
 ## 6. 接入真实 agent
 
-两个真实 agent 都已接好，命令与环境在 [`agents.py`](agents.py)，用 `--agent` 选（第 3.1 节：它决定建模块
+三个真实 agent 都已接好，命令与环境在 [`agents.py`](agents.py)，用 `--agent` 选（第 3.1 节：它决定建模块
 时把示例程序的 `AcpBackend` 变体换成哪一个）。代码里没有本机路径：命令从 `PATH` 或环境变量解析，凭据取自
 启动 `run.py` 的那个环境。
 
@@ -255,18 +256,21 @@ store 中每一步对应一份快照：
 |---|---|---|
 | `claude` | `npx -y @agentclientprotocol/claude-agent-acp` | 环境里的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`；`CLAUDE_CODE_EXECUTABLE` 或 `PATH` 里的 Claude CLI |
 | `dsh` | `dsh acp`（`DSH_EXECUTABLE` 或 `PATH` 里的 `dsh`） | `~/.dsh` 里已有的 DeepSeek 凭据 |
+| `trae` | `trae-cli acp serve`（`TRAE_EXECUTABLE` 或 `PATH` 里的 `trae-cli`） | `~/.trae` 里已有的 Trae 登录 |
 
 `claude` 的适配器是 Claude Agent SDK 的 ACP 实现（[仓库](https://github.com/agentclientprotocol/claude-agent-acp)）；
 它会去找 SDK 附带的 Claude CLI，`agents.py` 用 `PATH` 里的 `claude` 填 `CLAUDE_CODE_EXECUTABLE`。`dsh`
-用 `dsh acp`，CLI 不在 `PATH` 里时用 `DSH_EXECUTABLE` 指过去。
+用 `dsh acp`，CLI 不在 `PATH` 里时用 `DSH_EXECUTABLE` 指过去。`trae` 用 `trae-cli acp serve`，同理可用
+`TRAE_EXECUTABLE` 指过去；它的 ACP 不接受 system prompt（`sessionCapabilities` 里没有 `systemPrompt`），
+上下文走补的那一轮提示。
 
-同一份 viba 程序跑两个真实 agent：
+同一份 viba 程序跑三个真实 agent：
 
 ```bash
 python3 demo/viba_acp/test_agents.py
 ```
 
-它依次跑 `claude`、`dsh`，检查调度达到 `ok`、`initialize` 自报的 agent 名、两个会话各自的 wiki 与回答、
+它依次跑 `claude`、`dsh`、`trae`，检查调度达到 `ok`、`initialize` 自报的 agent 名、两个会话各自的 wiki 与回答、
 store 里两次会话与两次 prompt 的记录，以及同一 store 重跑时全部回放。缺命令的 agent 会跳过。
 
 也可以先用客户端单独验证一个命令：客户端发送一次请求并输出 JSON。
@@ -291,7 +295,7 @@ python3 viba_acp/acp_client.py --agent "dsh acp" "hello"
 | [`acp_client.py`](acp_client.py) | ACP 客户端：stdio 分帧、会话、prompt、权限、取消 |
 | [`demo/viba_acp.viba.md`](../demo/viba_acp.viba.md) | 示例程序 `two_wikis.viba` 的文档 |
 | [`demo/viba_acp/run.py`](../demo/viba_acp/run.py) | 运行入口：拼模块、调度、服务、store、trace |
-| [`demo/viba_acp/test_agents.py`](../demo/viba_acp/test_agents.py) | 同一份程序跑两个真实 agent 的集成检查 |
+| [`demo/viba_acp/test_agents.py`](../demo/viba_acp/test_agents.py) | 同一份程序跑三个真实 agent 的集成检查 |
 
 运行方式：
 

@@ -30,6 +30,7 @@ Session = types.Session
 AcpBackend = types.AcpBackend
 ClaudeAgentBackend = types.ClaudeAgentBackend
 DshAgentBackend = types.DshAgentBackend
+TraeAgentBackend = types.TraeAgentBackend
 AgentSessionContext = types.AgentSessionContext
 ContextVersion = types.ContextVersion
 SessionId = types.SessionId
@@ -244,13 +245,14 @@ AgentSessionContext =
 
 ### AcpBackend
 
-一个 ACP 后端：变体按后端实现分，现在是 Claude、DeepSeek Harness 两种。
+一个 ACP 后端：变体按后端实现分，现在是 Claude、DeepSeek Harness、Trae 三种。
 
 ```viba types
 AcpBackend =
     Oneof
   | ClaudeAgentBackend
   | DshAgentBackend
+  | TraeAgentBackend
 ```
 
 ### ClaudeAgentBackend
@@ -270,6 +272,17 @@ DeepSeek Harness 的 `acp` profile。`$context` 是这一实例的会话上下�
 
 ```viba types
 DshAgentBackend =
+    tagged[__type__, Object]
+  * $context AgentSessionContext
+```
+
+### TraeAgentBackend
+
+TraeCode CLI 的 ACP 服务器（`trae-cli acp serve`）。`$context` 是这一实例的会话上下文；它的 ACP 不接受
+system prompt，所以服务在建会话后先发一轮上下文提示。
+
+```viba types
+TraeAgentBackend =
     tagged[__type__, Object]
   * $context AgentSessionContext
 ```

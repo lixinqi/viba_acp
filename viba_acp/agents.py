@@ -8,7 +8,9 @@
   its endpoint and token come from this process's environment;
 - `dsh` — DeepSeek Harness's own `acp` profile, `dsh acp`; `DSH_EXECUTABLE`
   names the CLI, else the one on `PATH`; it uses the credentials `~/.dsh`
-  already has.
+  already has;
+- `trae` — TraeCode CLI's ACP server, `trae-cli acp serve`; `TRAE_EXECUTABLE`
+  names the CLI, else the one on `PATH`; it uses the login `~/.trae` already has.
 
 `the_command()` answers `(command, extra environment)`: the environment is
 layered over this process's own when the agent is spawned, never printed.
@@ -25,7 +27,7 @@ CLAUDE_ADAPTER = ("npx", "-y", "@agentclientprotocol/claude-agent-acp")
 
 
 def names():
-    return ("claude", "dsh")
+    return ("claude", "dsh", "trae")
 
 
 def the_command(name):
@@ -39,6 +41,11 @@ def the_command(name):
         if not executable:
             raise ValueError("the dsh CLI is not on PATH; set DSH_EXECUTABLE to it")
         return [executable, "acp"], {}
+    if name == "trae":
+        executable = find_trae()
+        if not executable:
+            raise ValueError("the trae-cli CLI is not on PATH; set TRAE_EXECUTABLE to it")
+        return [executable, "acp", "serve"], {}
     raise ValueError(f"unknown agent {name!r}; choose one of {', '.join(names())}")
 
 
@@ -52,10 +59,17 @@ def find_dsh():
     return shutil.which(os.environ.get("DSH_EXECUTABLE") or "dsh")
 
 
+def find_trae():
+    """The trae-cli CLI: `TRAE_EXECUTABLE`, else the one on `PATH`."""
+    return shutil.which(os.environ.get("TRAE_EXECUTABLE") or "trae-cli")
+
+
 def available(name):
     """Whether this agent can start on this machine, as far as a path can tell."""
     if name == "claude":
         return shutil.which("npx") is not None and find_claude() is not None
     if name == "dsh":
         return find_dsh() is not None
+    if name == "trae":
+        return find_trae() is not None
     return False

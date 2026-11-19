@@ -40,6 +40,7 @@ CLAUDE_BACKEND = "ClaudeAgentBackend"
 BACKEND_VARIANTS = {
     "claude": CLAUDE_BACKEND,
     "dsh": "DshAgentBackend",
+    "trae": "TraeAgentBackend",
 }
 
 
@@ -48,7 +49,8 @@ def main(argv=None) -> int:
     parser.add_argument("--store", default=None,
                         help="the environment storage the rounds share "
                              "(default: demo/viba_acp/.store/<agent>)")
-    parser.add_argument("--agent", default="claude", choices=("claude", "dsh"),
+    parser.add_argument("--agent", default="claude",
+                        choices=("claude", "dsh", "trae"),
                         help="the agent the demo drives (default: claude)")
     parser.add_argument("--trace", default=None,
                         help="where the ACP messages go, one JSON line per message "

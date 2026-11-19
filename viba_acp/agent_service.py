@@ -35,6 +35,7 @@ WORKSPACE = HERE.parent                   # the repository root
 _BACKEND_AGENTS = {
     "$ClaudeAgentBackend": "claude",
     "$DshAgentBackend": "dsh",
+    "$TraeAgentBackend": "trae",
 }
 
 # One conversation per agent, for the life of this service process.
